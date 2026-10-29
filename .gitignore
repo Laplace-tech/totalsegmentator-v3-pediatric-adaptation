@@ -1,0 +1,30 @@
+
+# Original medical imaging dataset
+/archives/
+/data/
+
+# Generated audit results (review before sharing)
+/manifests/audit_v300/
+
+# Future experiment artifacts
+/outputs/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.env
+.env.*
+
+# Large medical imaging files
+*.nii
+*.nii.gz
+*.zip
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Editor
+.vscode/
+.ipynb_checkpoints/
