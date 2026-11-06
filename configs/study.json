@@ -1,0 +1,366 @@
+{
+  "study_version": "abdominal_v1",
+  "status": "ready_for_research_training",
+  "qc_protocol": "configs/protocol.json",
+  "panel_status": "fixed_7_organs_public_reference_labels",
+  "labels": {
+    "background": 0,
+    "liver": 1,
+    "spleen": 2,
+    "kidney_left": 3,
+    "kidney_right": 4,
+    "pancreas": 5,
+    "adrenal_gland_left": 6,
+    "adrenal_gland_right": 7
+  },
+  "cohort": {
+    "review_screen": "automated_qc_pass_and_at_least_one_panel_mask_nonempty",
+    "automatic_screen_is_clinical_approval": false,
+    "review_unit": "case_and_organ",
+    "training_candidate_screen": "all_panel_nonempty_no_border",
+    "finetuning_cases_per_arm": 32,
+    "validation_cases_per_cohort": 16,
+    "allocation_status": "defined_by_immutable_development_split_manifest",
+    "insufficient_reviewed_cases_policy": "stop_if_QC_eligible_public_reference_cases_below_K_plus_validation_no_silent_backfill",
+    "split_unit": "case_with_exact_CT_deduplication",
+    "patient_independence_verified": false,
+    "patient_group_mapping": null,
+    "split_unit_decision": {
+      "date": "2026-10-29",
+      "authority": "explicit_user_confirmation",
+      "decision": "proceed_as_case_level_exploratory_study_and_disclose_patient_linkage_limitation"
+    },
+    "official_test_policy": "preserve_membership_no_training_or_parameter_selection",
+    "adult_sampling_strategy": "sorted_case_ids_seeded_uniform_without_replacement_validation_then_M2_rest_M0_no_covariate_matching",
+    "covariates_to_audit": [
+      "age",
+      "institute",
+      "study_type",
+      "slice_thickness",
+      "gender"
+    ],
+    "missing_covariates": "report_unknown_never_infer_contrast_from_scanner_name",
+    "reference_label_policy": "public_reference_with_technical_QC_and_recorded_manual_holds",
+    "label_policy_decision": {
+      "date": "2026-10-29",
+      "authority": "explicit_user_confirmation",
+      "decision": "use_public_reference_masks_disclose_limited_manual_QC_no_comprehensive_expert_review"
+    },
+    "clinical_annotation_approval_claim": false,
+    "split_seed": 20261029,
+    "pediatric_sampling_strategy": "sorted_case_ids_seeded_uniform_without_replacement_validation_then_M1_rest_unused",
+    "split_manifest": "manifests/splits_abdominal_v1/splits.json"
+  },
+  "training": {
+    "M0_initialization": "random_adult_training_only",
+    "M1_M2_initialization": "identical_M0_checkpoint_with_hash_verification",
+    "M1_M2_optimizer": "reset_both_identically",
+    "trainable_layers": "all",
+    "normalization_and_planning_fit": "M0_train_only_shared_by_all_models",
+    "architecture": "PlainConvUNet_explicit_configuration_not_auto_planned_nnunet",
+    "loss": {
+      "name": "Dice_plus_CE",
+      "dice_weight": 1.0,
+      "ce_weight": 1.0,
+      "dice_include_background": false
+    },
+    "budget_unit": "optimizer_updates",
+    "M1_M2_equal": [
+      "case_count",
+      "optimizer_updates",
+      "batch_size",
+      "optimizer",
+      "learning_rate_schedule",
+      "augmentation",
+      "patch_sampling",
+      "architecture",
+      "preprocessing"
+    ],
+    "paired_training_seeds": [
+      20261029
+    ],
+    "optional_replication_seeds": [
+      20261030,
+      20261031
+    ],
+    "replication_policy": "first_complete_one_M0_M1_M2_triplet; additional_runs_report_all_seeds_never_select_best_seed_or_retune_on_test",
+    "replication_plan": {
+      "fixed_on": "2026-11-06",
+      "seeds": [20261029, 20261030, 20261031],
+      "decision_timing": "additional_repeats_after_first_seed_validation_before_test_inference",
+      "scope": "training_randomness_on_one_fixed_case_split",
+      "M0_per_seed": "train_from_random_initialization_then_select_by_existing_adult_validation_rule",
+      "paired_branches": "M1_and_M2_start_from_the_same_selected_M0_within_each_seed",
+      "summary": "all_seed_paired_organ_deltas_mean_sample_SD_range_and_sign_counts_no_best_seed_selection",
+      "uncertainty": "case_resampling_keeps_all_seed_and_model_values_together_conditional_on_these_seeds",
+      "test_policy": "evaluate_all_three_seed_triplets_after_training_no_test_driven_retuning"
+    },
+    "M1_M2_checkpoint_selection": "last_update_at_equal_fixed_budget",
+    "M0_checkpoint_selection": "highest_adult_validation_macro_Dice_at_fixed_validation_intervals_earliest_tie",
+    "early_stopping": false,
+    "test_time_augmentation": false,
+    "postprocessing": "none",
+    "numeric_training_plan": {
+      "version": "single_seed_v1",
+      "fixed_on": "2026-10-30",
+      "optimizer": "SGD_Nesterov",
+      "momentum": 0.99,
+      "weight_decay": 3e-05,
+      "M0": {
+        "optimizer_updates": 50000,
+        "learning_rate": 0.01,
+        "validation_every_updates": 2500
+      },
+      "M1": {
+        "optimizer_updates": 5000,
+        "learning_rate": 0.001,
+        "validation_every_updates": 1000
+      },
+      "M2": {
+        "optimizer_updates": 5000,
+        "learning_rate": 0.001,
+        "validation_every_updates": 1000
+      },
+      "schedule": {
+        "name": "polynomial_by_successful_optimizer_updates",
+        "power": 0.9
+      },
+      "foreground_sampling_probability": 0.3333333333333333,
+      "foreground_policy": "uniform_organ_then_uniform_cached_location",
+      "case_sampling": "uniform_with_replacement_one_case_per_update",
+      "augmentation": {
+        "name": "intensity_only_v1",
+        "order": [
+          "brightness",
+          "contrast",
+          "gaussian_noise"
+        ],
+        "brightness_probability": 0.15,
+        "brightness_range": [
+          0.85,
+          1.15
+        ],
+        "contrast_probability": 0.15,
+        "contrast_range": [
+          0.85,
+          1.15
+        ],
+        "noise_probability": 0.1,
+        "noise_std_range": [
+          0.0,
+          0.1
+        ],
+        "spatial": "none_preserve_anatomical_laterality",
+        "ignored_voxels": "restore_zero_where_target_is_ignore"
+      },
+      "amp": "float16_initial_scale_1024",
+      "gradient_clip_norm": 12.0,
+      "checkpoint_every_updates": 250,
+      "log_every_updates": 25,
+      "max_consecutive_amp_skips": 10,
+      "max_total_amp_skips": 100,
+      "cpu_threads": 4,
+      "case_cache_gib": 2.0,
+      "max_inference_logits_gib": 5.0,
+      "disk_reserve_gib": 10,
+      "validation_metric": "casewise_7_organ_macro_hard_Dice_ignore_overlap_no_smoothing",
+      "validation_roles": {
+        "M0": [
+          "adult_validation"
+        ],
+        "M1": [
+          "adult_validation",
+          "pediatric_validation"
+        ],
+        "M2": [
+          "adult_validation",
+          "pediatric_validation"
+        ]
+      },
+      "retention": "latest_resume_and_selected_checkpoint_per_branch_no_routine_prediction_volumes",
+      "determinism": "fixed_rng_and_cudnn_deterministic_torch_warn_only_no_universal_bitwise_claim",
+      "rationale": "predeclared_resource_bounded_exploratory_budget_not_convergence_guarantee_or_full_nnunet_recipe",
+      "source": "https://github.com/MIC-DKFZ/nnUNet/blob/master/nnunetv2/training/nnUNetTrainer/nnUNetTrainer.py",
+      "smoke": {
+        "updates_per_branch": 32,
+        "validation_every_updates": 32,
+        "checkpoint_every_updates": 16,
+        "validation_scope": "all_32_development_validation_cases_for_each_branch",
+        "purpose": "execution_and_timing_only_no_hyperparameter_selection"
+      }
+    },
+    "feasibility_probe_overrides": {
+      "purpose": "selected_7_labels_native_grid_mechanical_probe_not_research_training",
+      "target_spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "spacing_unit_assumption": "native_affine_units_physical_mm_not_verified",
+      "patch_size": [
+        96,
+        128,
+        128
+      ],
+      "max_prepared_arrays_gib": 4.0,
+      "save_artifacts": false
+    },
+    "fixed_execution_plan": {
+      "patch_size": [
+        96,
+        128,
+        128
+      ],
+      "batch_size": 1,
+      "features_per_stage": [
+        32,
+        64,
+        128,
+        256,
+        320
+      ],
+      "network_definition": "tsv3.training.architecture",
+      "deep_supervision": false,
+      "preprocessing_grid": "canonical_RAS_native_grid_no_additional_downsampling",
+      "expected_native_spacing": [
+        1.5,
+        1.5,
+        1.5
+      ],
+      "spacing_absolute_tolerance": 0.0001,
+      "spacing_unit_status": "unknown_do_not_label_distances_mm_without_evidence",
+      "overlapping_label_voxels": "ignore_in_training_loss_do_not_assign_arbitrary_organ_priority",
+      "label_preservation_policy": "stop_if_any_positive_reference_label_disappears_after_overlap_handling",
+      "resource_policy": "sequential_preprocessing_shared_compressed_disk_cache_bounded_case_loading_no_all_cohort_in_RAM",
+      "evidence": {
+        "result_path": "outputs/feasibility_abdominal_v1/result.json",
+        "result_sha256": "2216b2b5d1b3b3dd5d5c94ecdb2d135d080b2684989dd2b2859e8757acd5c450",
+        "elapsed_seconds": 118.97345915600454,
+        "peak_allocated_mib": 1842.79443359375,
+        "peak_reserved_mib": 2548.0,
+        "peak_process_rss_mib": 7170.01953125,
+        "scope": "8_development_cases_short_updates_not_accuracy_or_all_case_resource_guarantee"
+      }
+    },
+    "preprocessing_cache": {
+      "format": "npz_compressed_float32_CT_uint8_target",
+      "intensity_storage": "unnormalized_native_float32_lossless_compression_no_float16_quantization",
+      "normalization_fit": "M0_train_only",
+      "normalization_sampling": "foreground_excluding_overlap_max_100000_per_case_seed_0",
+      "normalization_application": "apply_shared_clipping_and_zscore_on_load_no_second_normalized_cache",
+      "locations_per_organ": 10000,
+      "sampling_seed": 20261029,
+      "scope": "all_five_frozen_development_roles_exclude_unused_and_official_test",
+      "retention": "single_shared_cache_across_M0_M1_M2_keep_manifest_and_logs"
+    },
+    "execution_evidence": {
+      "run_path": "outputs/training_smoke_abdominal_v1/run.json",
+      "run_sha256": "473f114acba2b8094a0945e4ac8b381cf87bddc944c7d494c205ea59abef161e",
+      "branch_status_sha256": {
+        "M0": "a5d64fbfd899a6a5c3e626bd1019c6f3d1d68bf864d9cdd8b1aca563f5071290",
+        "M1": "250b386c0ca0070666127974eb162df487f340c40c3a863ac6017060c1f554bd",
+        "M2": "5978d5ab5ae65ce2a336ba88768ab8be81b4d8656eee7f96b5c55993a132d40a"
+      },
+      "scope": "32_updates_per_branch_full_32_case_validation_not_convergence",
+      "post_smoke_changes": "hard_Dice_extracted_to_shared_evaluation_module_with_equivalence_tests; prelaunch_evaluation_guards_and_source_snapshot_added; optimization_and_inference_unchanged",
+      "validation_sha256": {
+        "M0": "b33e8056a44943000f7dec584d41abab6eb38745aff9fe16ea15d1a51e2dedf0",
+        "M1": "de876b530bfb486365f2ebfa1e37699393b918720b23d272f1e4d1dd915c0057",
+        "M2": "eae677c104ae0253daf4bbcc3813fa933e0bef93669f13aa051f8882690b5eca"
+      }
+    }
+  },
+  "evaluation": {
+    "primary_metric": "Dice",
+    "secondary_metrics": [
+      "NSD",
+      "HD95"
+    ],
+    "primary_contrast": "M1_minus_M2_on_pediatric_test",
+    "secondary_contrast": "M1_minus_M0_on_pediatric_test",
+    "adult_retention": "M1_minus_M0_and_M2_minus_M0_descriptive_no_noninferiority_claim",
+    "evaluation_grid": "original_CT_voxel_index_grid_no_resampling",
+    "organ_eligibility": "technical_QC_public_nonempty_no_border_primary_all_nonempty_sensitivity",
+    "empty_GT": "out_of_FOV_or_unknown_not_scored_true_absence_report_false_positive_volume_separately",
+    "empty_prediction_with_positive_GT": {
+      "Dice": 0,
+      "NSD": 0,
+      "HD95": "positive_infinity_report_failure_count_never_silently_drop"
+    },
+    "HD95_deltas": "report_failure_transitions_separately_finite_paired_deltas_are_conditional_with_denominator",
+    "metric_implementation_version": "surface-distance==0.1_with_tsv3_contract_v1",
+    "aggregation": "mean_case_scores_per_organ_no_voxel_pooling",
+    "uncertainty": {
+      "resampling_unit": "case",
+      "paired_models_and_organs": true,
+      "bootstrap_replicates": 10000,
+      "confidence_level": 0.95,
+      "seed": 20261029,
+      "training_seeds": "report_each_seed_and_average_within_case_before_case_bootstrap",
+      "limitation": "assumes_case_independence_unverified_patient_overlap_may_underestimate_uncertainty"
+    },
+    "interpretation_scope": "adaptation_to_this_pediatric_cohort_not_an_isolated_causal_effect_of_age_or_anatomy; acquisition_and_institution_confounding_not_fully_controlled",
+    "significance_testing": "none_primary_report_paired_effects_and_pointwise_intervals_not_simultaneous_claims",
+    "organ_size_analysis": "exploratory_native_GT_voxel_count_left_right_not_independent_organ_types",
+    "baseline_gain_association": "exploratory_acknowledge_mathematical_coupling",
+    "distance_unit": "voxel",
+    "NSD_tolerance_voxels": 2.0,
+    "distance_unit_decision": {
+      "date": "2026-10-30",
+      "authority": "explicit_user_confirmation",
+      "decision": "HD95_voxel_NSD_tolerance_2_voxels_no_mm_conversion"
+    },
+    "label_policy": "public_reference_with_technical_QC_no_expert_test_review_no_full_FOV_claim",
+    "eligibility_policy_revision": {
+      "date": "2026-10-30",
+      "basis": "previous_user_authorization_of_public_reference_label_policy",
+      "change": "replace_unfulfilled_full_FOV_manual_review_requirement_with_explicit_automated_public_reference_screen"
+    },
+    "manifest": "manifests/evaluation_abdominal_v1/contract.json",
+    "Dice_definition": "2_intersection_over_reference_plus_prediction_no_smoothing_original_individual_GT_masks",
+    "NSD_definition": "surfel_area_weighted_two_sided_surface_Dice_at_fixed_2_voxel_tolerance",
+    "HD95_definition": "max_of_two_directed_surface_area_weighted_95th_percentile_distances",
+    "test_overlap_policy": "score_each_original_binary_reference_independently_no_overlap_ignore_or_label_priority",
+    "missing_reference_policy": "exclude_empty_GT_unknown_cause_report_counts_and_predicted_volume_without_claiming_true_negative",
+    "sensitivity_analysis": [
+      "include_all_technical_QC_positive_GT_even_if_border_touching",
+      "descriptive_same_cases_with_all_7_primary_eligible_organs"
+    ],
+    "implementation_sources": [
+      "https://github.com/google-deepmind/surface-distance",
+      "https://pypi.org/project/surface-distance/0.1/"
+    ],
+    "inference": {
+      "grid": "canonical_RAS_then_inverse_orientation_to_original_CT_grid",
+      "tile_step_size": 0.5,
+      "gaussian_blending": true,
+      "mirroring": false,
+      "postprocessing": "none",
+      "segmentation": "exclusive_argmax_background_plus_7_organs"
+    },
+    "parameter_selection": "no_test_predictions_or_scores_before_protocol_freeze_no_retuning_on_test",
+    "reporting": [
+      "per_organ_denominators",
+      "paired_case_scores_M0_M1_M2",
+      "pointwise_case_bootstrap_CI",
+      "HD95_empty_prediction_failure_transitions",
+      "case_composition_and_small_sample_limitations"
+    ]
+  },
+  "evidence_required_before_freeze": [
+    "passed_execution_smoke",
+    "frozen_evaluation_manifest_and_metric_tests",
+    "exact_source_and_configuration_snapshot_at_run_start"
+  ],
+  "review_display": {
+    "intensity_window": [
+      -150,
+      250
+    ],
+    "tile_size": [
+      280,
+      210
+    ],
+    "slice_selection": "bbox_center_three_orthogonal_views_not_full_volume_review"
+  }
+}
