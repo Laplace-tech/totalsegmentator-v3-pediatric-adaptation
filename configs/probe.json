@@ -1,0 +1,19 @@
+{
+  "purpose": "real_data_mechanical_feasibility_not_research_training",
+  "seed": 20261029,
+  "target_spacing": [3.0, 3.0, 3.0],
+  "spacing_unit_assumption": "nominal_mm_not_verified_when_NIfTI_units_unknown",
+  "patch_size": [64, 96, 96],
+  "features_per_stage": [32, 64, 128, 256, 320],
+  "batch_size": 1,
+  "learning_rate": 0.01,
+  "momentum": 0.99,
+  "weight_decay": 0.00003,
+  "warmup_steps": 1,
+  "measured_steps": 6,
+  "foreground_sampling_probability": 0.3333333333333333,
+  "augmentation": "none_in_mechanical_probe",
+  "overlapping_label_voxels": "ignore_label_for_loss_pending_annotation_policy",
+  "max_inference_logits_gib": 5.0,
+  "final_research_configuration": false
+}

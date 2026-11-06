@@ -4,7 +4,7 @@
 /data/
 
 # Generated audit results (review before sharing)
-/manifests/audit_v300/
+/manifests/
 
 # Future experiment artifacts
 /outputs/
@@ -12,6 +12,8 @@
 # Python
 __pycache__/
 *.pyc
+*.egg-info/
+/build/
 .venv/
 .env
 .env.*

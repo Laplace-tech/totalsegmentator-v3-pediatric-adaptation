@@ -1,0 +1,22 @@
+{
+  "dataset_version": "3.0.0",
+  "seed": 20261029,
+  "pediatric_age_upper_exclusive": 18,
+  "age_review_above": 100,
+  "missing_age_policy": "exclude_until_verified",
+  "patient_group_mapping": null,
+  "manual_training_exclusions": {
+    "s1445": "identical_ct_to_official_test_s1446",
+    "s2107": "duplicate_ct_with_conflicting_age_and_annotations",
+    "s2109": "duplicate_ct_with_conflicting_age_and_annotations",
+    "s2110": "duplicate_ct_with_conflicting_age_and_annotations"
+  },
+  "finetuning_cases_per_arm": 128,
+  "validation_cases_per_cohort": 32,
+  "max_geometry_displacement_voxels": 0.1,
+  "empty_mask_policy": "flag_for_organ_eligibility_not_case_exclusion",
+  "border_mask_policy": "flag_incomplete_volume_not_automatic_case_exclusion",
+  "annotation_review": "pending",
+  "analysis_organ_panel": "pending",
+  "split_status": "provisional_case_level_pending_patient_mapping_and_review"
+}
