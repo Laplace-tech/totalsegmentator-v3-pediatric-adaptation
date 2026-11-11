@@ -81,19 +81,23 @@
     ],
     "optional_replication_seeds": [
       20261030,
-      20261031
+      20261031,
+      20261101,
+      20261102
     ],
     "replication_policy": "first_complete_one_M0_M1_M2_triplet; additional_runs_report_all_seeds_never_select_best_seed_or_retune_on_test",
     "replication_plan": {
       "fixed_on": "2026-11-06",
-      "seeds": [20261029, 20261030, 20261031],
+      "amended_on": "2026-11-11",
+      "amendment_reason": "user_decision_to_extend_training_randomness_replication_from_three_to_five_seeds_before_official_test_evaluation",
+      "seeds": [20261029, 20261030, 20261031, 20261101, 20261102],
       "decision_timing": "additional_repeats_after_first_seed_validation_before_test_inference",
       "scope": "training_randomness_on_one_fixed_case_split",
       "M0_per_seed": "train_from_random_initialization_then_select_by_existing_adult_validation_rule",
       "paired_branches": "M1_and_M2_start_from_the_same_selected_M0_within_each_seed",
       "summary": "all_seed_paired_organ_deltas_mean_sample_SD_range_and_sign_counts_no_best_seed_selection",
       "uncertainty": "case_resampling_keeps_all_seed_and_model_values_together_conditional_on_these_seeds",
-      "test_policy": "evaluate_all_three_seed_triplets_after_training_no_test_driven_retuning"
+      "test_policy": "evaluate_all_five_seed_triplets_after_training_no_test_driven_retuning"
     },
     "M1_M2_checkpoint_selection": "last_update_at_equal_fixed_budget",
     "M0_checkpoint_selection": "highest_adult_validation_macro_Dice_at_fixed_validation_intervals_earliest_tie",

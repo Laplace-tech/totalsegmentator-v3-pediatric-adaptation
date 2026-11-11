@@ -18,7 +18,8 @@
 M0는 **공식 TotalSegmentator V3 pretrained 모델이 아닌** 자체 학습 PlainConvUNet이다.
 세 모델은 성인·소아 development validation 각 16건의 동일 case에서 비교한다.
 공식 test 108건(성인 88, 소아 20)은 지금까지 추론·평가에 사용하지 않았다.
-Seed 20261029·20261030은 완료했고, 사전 선언한 20261031은 남아 있다.
+Seed 20261029·20261030은 완료했다. 공식 test 평가 전에 반복 계획을 **총 5 seed**로
+확장했으며 20261031·20261101·20261102가 남아 있다.
 각 seed의 M1·M2는 동일한 선정 M0에서 출발하며, seed별 결과를 별도 환자로 세지 않는다.
 
 ## 현재 결과: development validation만
@@ -54,7 +55,7 @@ Seed 20261029·20261030은 완료했고, 사전 선언한 20261031은 남아 있
 특히 왼쪽 신장의 M1−M2는 +0.153에서 +0.028로 달라졌고, 첫 seed M2의 성능 하락이
 그 차이에 크게 기여했다. 양쪽 부신이 소아 M1−M0 균등평균 개선의 약 71%/74%를 차지한다.
 따라서 현재 근거는 소아 적응 이득의 장기별 이질성과 성인 성능 저하 가능성을 보여주는
-**development 관찰**이며, 일반화 결론은 세 번째 seed와 보류한 test 평가 후 검토한다.
+**development 관찰**이며, 5 seed 완료와 보류한 test 평가 후 해석을 다시 검토한다.
 
 두 seed는 분할·정규화·모델·loss·학습 하이퍼파라미터와 장비·의존성 버전이 같다.
 다만 첫 seed 실행 중 무손실 fast cache로 이관했고 둘째 seed는 처음부터 fast cache와
@@ -63,14 +64,27 @@ CPU prefetch를 사용했다. 이 실행 경로 차이를 기록했으며 bitwis
 ## 다음 실행
 
 Fast cache 673건의 검증과 원본 전처리 배열 약 25.55 GiB 정리를 완료했다.
-세 번째 seed는 사용자 터미널에서 **별도로** 시작한다. 이 명령은 해당 seed의 M0→M1→M2를 수행한다.
+반복 seed는 사용자 터미널에서 **한 번에 하나씩** 시작한다. 각 실행은 해당 seed의
+M0→M1→M2를 수행한다.
+
+| Seed | 상태 |
+|---:|---|
+| 20261029, 20261030 | 학습·development validation 완료 |
+| 20261031, 20261101, 20261102 | 실행 예정; 완료 전 공식 test 평가 보류 |
 
 ```bash
 .venv/bin/python -u -m tsv3.training --seed 20261031 --prefetch --fast-cache data/preprocessed/abdominal_v1_fast --host-volume /mnt/c
 ```
 
-중단 후 같은 명령에 `--resume`을 붙인다. 세 번째 seed의 무결성·validation을 확인한 뒤
-고정 평가 계약에 따라 공식 test를 평가한다. 모델 가중치, 원본 CT, case별 manifest와 실행 출력은
+다음 seed는 **앞선 seed의 완료와 무결성 확인 후** `--seed`만 `20261101`, 이어서 `20261102`로
+바꿔 별도 실행한다. 중단한 seed를 재개할 때만 같은 명령에 `--resume`을 붙인다.
+5개 triplet 모두의 update 예산·동일 M0 출발·checkpoint를 확인하고, 각 seed의 장기별 paired
+차이와 전체 평균·표본 SD·범위·방향 일치 횟수를 전부 보고한다. 공식 test는 모든 seed의 학습이
+끝난 뒤 고정 평가 계약으로 한 번 평가하며, test 결과로 seed를 고르거나 설정을 조정하지 않는다.
+동일 case의 여러 seed 결과를 독립 환자로 세지 않고, case bootstrap에서는 seed·모델 값을
+case와 함께 묶어 재표집한다. 반복 seed는 같은 split의 학습 난수 변동을 보여주며,
+소아 test의 장기별 적격 사례 6–9건과 환자 ID 부재라는 한계는 그대로 남는다.
+모델 가중치, 원본 CT, case별 manifest와 실행 출력은
 Git에서 제외해 로컬에 보관한다. 공개 README에는 검증된 집계값과 한계를 기록한다.
 
 ## 실행 환경
@@ -522,7 +536,7 @@ SQLite 결과가 QC의 재개 원본이고 CSV는
 - probe는 nnU-Net 구성 요소를 이용한 명시적 PlainConvUNet 설정이다. 자동 planning된 nnU-Net 성능 재현 실험이 아니다.
 - 과거 117-class probe는 nominal 3mm, 현재 7-class probe는 저장 격자 nominal 1.5에서 시행했다. 둘 다 짧은 실행 점검이다.
 - probe M1·M2는 같은 probe M0 가중치에서 시작하고 optimizer는 동일하게 재초기화한다. normalization은 probe M0 성인 입력에서만 산출한다.
-- 전처리·전체 validation 실행 시험·수치 학습 계획·평가 protocol 고정과 M0·M1·M2 두 seed 학습을 완료했다. 세 번째 seed와 최종 test 평가·분석이 남아 있다. 환자 ID 부재와 제한된 annotation 검토는 명시된 연구 한계다.
+- 전처리·전체 validation 실행 시험·수치 학습 계획·평가 protocol 고정과 M0·M1·M2 두 seed 학습을 완료했다. 남은 3개 seed와 최종 test 평가·분석이 남아 있다. 환자 ID 부재와 제한된 annotation 검토는 명시된 연구 한계다.
 
 ## 근거
 

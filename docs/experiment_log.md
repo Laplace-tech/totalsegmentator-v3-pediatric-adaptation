@@ -350,3 +350,11 @@
 - 세 번째 seed의 `--dry-run`이 처음에는 `Cache contract/case set differs from frozen split`로 중단됐다. 비교 결과 673건 case 집합과 다른 signature 필드는 같고 `preprocessing_code_sha256`만 달랐다. 두 seed의 실행 시점 `source_snapshot.tar.gz`에 보관된 `preprocessing.py`와 현재 파일의 차이는 파일 끝 빈 줄 하나였다. 현재 파일 끝을 원래 실행 시점의 바이트와 일치시켜 저장된 SHA-256 `24b6d2c68a3b418ff75ba26ca28b0ecede0518aeae53d89b37975074536cbf8a`를 복구했다. 데이터, split, 수치 학습 설정, 전처리 로직은 변경하지 않았다.
 - 재실행한 `--dry-run`은 성공했다: seed 20261031, cache 673건, M0/M1/M2 예산 50,000/5,000/5,000, split SHA `95946b908a5bc85ab6e6f43888e96a2954f1f4e082e72e15e9bd4a25e8a2df0e`, normalization SHA `706ab89111d711a0c59e341086a059a2094df6ef6704364f7d44743efc6145e9`. Fast cache 검증 기록은 673/673, error 없음이며 fast manifest SHA가 일치한다. 단위검사 37개 통과. WSL 여유 약 868 GiB, C: 여유 약 110 GiB였다.
 - `git diff --check`는 원래 실행 소스와 바이트 일치를 위해 되살린 EOF 빈 줄을 whitespace 경고로 표시한다. 이 빈 줄은 cache contract의 파일 전체 해시를 보존하기 위한 의도된 차이이며, 다른 내용 변경이나 테스트 실패를 뜻하지 않는다. 세 번째 seed는 사용자 터미널에서 별도 실행하고, 완료 전 학습 소스·고정 설정을 변경하지 않는다.
+
+## 2026-11-11 — 공식 test 평가 전 반복 계획을 총 5 seed로 확장
+
+- 사용자 요청으로 학습 난수 반복을 기존 3개(20261029·20261030·20261031)에서 5개(추가 20261101·20261102)로 확정했다. 결정 시점에 완료된 것은 앞의 두 seed뿐이고 20261031 실행 폴더와 학습 프로세스는 없었다. 공식 test의 모델 추론·점수는 아직 수행하지 않았다.
+- `configs/study.json`에는 원래 2026-11-06 선언 날짜를 보존하고 2026-11-11 개정 날짜·사유·5개 seed·전체 test 평가 정책을 추가했다. 이미 완료한 두 seed의 checkpoint, split, cache, 수치 학습 설정, test eligibility는 수정하지 않았다. 계획 개정으로 앞으로 생성될 run의 `study_sha256`은 기존 두 run과 달라지며, 이것을 학습 하이퍼파라미터 차이로 해석하지 않는다. 실행별 study snapshot을 보존하고 실제 numeric config를 비교한다.
+- 남은 세 seed는 하나씩 독립 실행하고 각 triplet의 M0 50,000, M1/M2 각 5,000 successful updates와 동일 M0 출발을 검증한다. 다섯 seed 모두 장기별 paired 효과와 평균·표본 SD·범위·방향 일치 횟수를 보고한다. 가장 좋은 seed만 고르지 않고, 공식 test는 모든 학습 완료 후 기존 평가 계약으로 평가한다. Case bootstrap은 같은 case의 seed·모델 값을 함께 재표집하며 seed를 독립 환자로 세지 않는다.
+- 추가 두 triplet의 학습 시간은 둘째 seed 실측 약 6.4시간/triplet에 근거하면 약 12–16시간 범위로 계획하며, 저장 출력은 seed당 기존 약 1–1.5 GiB를 기준으로 대략 2–3 GiB를 예상한다. 이는 추정이고 test 추론 비용은 별도다. 반복 확대는 고정 split에서 학습 난수 변동을 더 관찰하기 위한 것으로, 작은 소아 test 표본이나 환자 ID 부재를 해결하지 않는다.
+- 변경 후 20261031·20261101·20261102 각각의 실제 데이터 `--dry-run`이 통과했다. 세 실행 모두 cache 673건, 동일 split·정규화 SHA, M0/M1/M2 예산 50,000/5,000/5,000을 반환했고 서로 다른 seed별 출력 경로를 가리킨다. `python -m unittest discover -s tests -q` 37개 통과, `git diff --check` 통과. 이는 학습 완료나 test 평가가 아니라 실행 전 계약 점검이다.
