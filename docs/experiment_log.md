@@ -343,3 +343,10 @@
 - 현재 코드·설정·lockfile을 환경, cohort/QC, 전처리/cache, 평가 계약, 학습/검증 단계별 Git 커밋으로 정리했다. 원본 CT·mask, 생성된 case별 manifest, checkpoint, 실행 출력은 `.gitignore`로 제외했다. 앞선 실행의 원본 시점은 run별 `source_snapshot.tar.gz`에 보존되므로 새 Git 커밋을 과거 학습 시점의 bitwise 동일 source로 오인하지 않는다.
 - README에 연구 질문, M0/M1/M2 비교, 두 seed의 development validation macro·장기별 차이, 성인 성능 변화, 실행 경로 차이와 남은 test 평가를 명시했다. 원격에서 열리지 않는 로컬 출력 링크는 경로 표기로 바꿨다. 세 번째 seed 20261031과 공식 test는 아직 평가 결과가 없다.
 - 현재 source/config를 대상으로 `python -m unittest discover -s tests -q`: 37개 통과. `git diff --check`와 단계별 staged diff 검사를 수행했다. 이 검사는 완료된 학습의 성능을 재검증하는 절차가 아니라 공개할 코드·문서의 기본 점검이다.
+
+## 2026-11-11 — 세 번째 seed 실행 전 점검과 cache 소스 해시 복구
+
+- 두 seed의 M0/M1/M2 완료 상태와 `replication_validation.json`을 재확인했다. `outputs/training_abdominal_v1_seed20261031/`은 아직 없고 실행 중인 학습 프로세스도 없다. 공식 test 추론·평가 결과는 아직 없다.
+- 세 번째 seed의 `--dry-run`이 처음에는 `Cache contract/case set differs from frozen split`로 중단됐다. 비교 결과 673건 case 집합과 다른 signature 필드는 같고 `preprocessing_code_sha256`만 달랐다. 두 seed의 실행 시점 `source_snapshot.tar.gz`에 보관된 `preprocessing.py`와 현재 파일의 차이는 파일 끝 빈 줄 하나였다. 현재 파일 끝을 원래 실행 시점의 바이트와 일치시켜 저장된 SHA-256 `24b6d2c68a3b418ff75ba26ca28b0ecede0518aeae53d89b37975074536cbf8a`를 복구했다. 데이터, split, 수치 학습 설정, 전처리 로직은 변경하지 않았다.
+- 재실행한 `--dry-run`은 성공했다: seed 20261031, cache 673건, M0/M1/M2 예산 50,000/5,000/5,000, split SHA `95946b908a5bc85ab6e6f43888e96a2954f1f4e082e72e15e9bd4a25e8a2df0e`, normalization SHA `706ab89111d711a0c59e341086a059a2094df6ef6704364f7d44743efc6145e9`. Fast cache 검증 기록은 673/673, error 없음이며 fast manifest SHA가 일치한다. 단위검사 37개 통과. WSL 여유 약 868 GiB, C: 여유 약 110 GiB였다.
+- `git diff --check`는 원래 실행 소스와 바이트 일치를 위해 되살린 EOF 빈 줄을 whitespace 경고로 표시한다. 이 빈 줄은 cache contract의 파일 전체 해시를 보존하기 위한 의도된 차이이며, 다른 내용 변경이나 테스트 실패를 뜻하지 않는다. 세 번째 seed는 사용자 터미널에서 별도 실행하고, 완료 전 학습 소스·고정 설정을 변경하지 않는다.
