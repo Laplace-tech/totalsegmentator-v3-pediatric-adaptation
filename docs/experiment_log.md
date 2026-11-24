@@ -377,3 +377,43 @@
 - 기존 규칙의 10,000회 paired case bootstrap에서 같은 case의 3 seed·모델 값을 함께 재표집했다. 95% percentile 범위는 소아 M1−M2 [+0.105216,+0.157596], 소아 M1−M0 [+0.091610,+0.133998], 성인 M1−M0 [−0.039396,−0.024699]다. 검증 표본 16건과 반복 checkpoint 선택에 조건부인 탐색적 범위이며 확인적 추론이나 외부 일반화 근거로 쓰지 않는다.
 - 재사용 가능한 `scripts/02_summarize_development.py`가 선언된 seed 순서를 강제하고, 입력 validation JSON·checkpoint·source snapshot 해시, 동일 M0 출발, 50,000/5,000/5,000 update 예산, 숫자 설정, case·장기별 점수 및 동일 split·정규화·평가 계약을 확인한 뒤 집계한다. 앞선 2-seed `replication_validation.json`의 여섯 contrast×두 seed 수치와 재계산 결과가 일치한다. 3-seed 결과는 `outputs/training_abdominal_v1_seed20261031/replication_validation.json` SHA-256 `8e76aaaea3db4d89fd79d6262c6445e819954b35036659917dcf7a52411abc53`에 보관한다. 공개 집계 그림은 `docs/figures/development_validation.png`다.
 - 현재 계획의 5 seed 중 3개만 완료됐다. 공식 test 모델 추론·점수는 아직 없고, 환자 연결 ID 부재·제한된 공개 라벨 검토·동일 validation 재사용·장기별 작은 소아 test 표본은 남은 한계다. 새 집계 script는 이 시점에 추가됐으므로 앞으로 실행할 seed의 source snapshot에는 포함되지만, 학습 numeric config와 `src/tsv3/` 학습 함수는 변경하지 않았다.
+
+
+## 2026-11-19 — seed 20261101 M0 완료·후반 부신 Dice 급락 및 M1 완료
+
+- M0 50,000 successful updates 완료, AMP skip 13/50,013 attempts. 선정 M0는 사전 규칙에 따른 성인 validation 최고인 27,500 updates, macro Dice 0.9310043910587572이다. `M0/selected.pt` SHA-256 `ded14c79c4bc68b0df55a201f71888f710c8fb5ee44b76a861faf6b00d2c9331`은 완료 status와 일치한다.
+- 성인 validation macro는 30,000 updates에 0.5524537576026004로 급락했다. 같은 16 case에서 양 부신 Dice가 모두 0이 되었고, 50,000 updates까지 회복하지 않았다. 마지막 macro는 0.6775714406336567이다. 최고점 대비 macro 감소 0.253433의 약 99.4%는 양 부신 점수 변화로 설명된다. Dice만 저장돼 빈 prediction과 위치 불일치를 구분할 수 없으며 원인은 미확정이다. 선정/마지막 checkpoint 모델 tensor 및 기록 loss는 finite였다. 이전 seed와 split·정규화·fast cache·numeric plan·fixed execution plan hash가 동일하고, 직전 seed와 training.py hash도 같다. 학습 안정성 문제로 기록하며 seed를 제외하거나 설정을 소급 변경하지 않는다.
+- M1 5,000 successful updates 완료(2026-11-19 약 15:18 KST 확인), AMP skip 0, 실행 약 45.9분. `M1/validation_005000.json`의 성인·소아 각 16 case×7장기 점수가 finite·0–1이며 저장 macro/장기 평균과 재계산이 일치한다. M1 selected SHA-256 `634abac7752e2e5dc97d20abd283c5480ba522dac8fd531df5c8edc00c63da32`은 완료 status와 일치하고, checkpoint provenance의 M0 parent SHA도 선정 M0와 일치한다.
+- M1 최종 소아 macro Dice 0.8121647617357254, 성인 macro Dice 0.8919542415141662. 장기 순서 liver/spleen/kidney_left/kidney_right/pancreas/adrenal_left/adrenal_right에서 소아 점수는 0.947222/0.919034/0.926835/0.888621/0.796913/0.606830/0.599698, 성인 점수는 0.966209/0.967534/0.962557/0.953898/0.843395/0.815894/0.734192이다.
+- 같은 성인 16 case에서 M1−선정 M0 macro는 −0.03905014954459102이며 16/16 case 모두 감소. 장기별 변화는 −0.009333/+0.001382/−0.003772/−0.011356/−0.037294/−0.098546/−0.114432로 비장을 제외한 6/7장기 감소다. 소아 M0 사후 평가 파일은 아직 없어 이번 seed의 소아 M1−M0는 미산출이다. M2가 진행 중이므로 주 비교 M1−M2도 미산출이며 공식 test는 평가하지 않았다.
+
+
+## 2026-11-20 — seed 20261101 완료·M0 소아 사후 평가 검산 및 4-seed 집계
+
+- M0/M1/M2 status와 run.json은 모두 complete이며 예산 50,000/5,000/5,000 updates를 완료했다. M1/M2 AMP skip은 0이고, 기존 선정 M0(27,500 updates)에서의 동일 초기 가중치·checkpoint parent 연결과 각 selected SHA를 집계 코드로 확인했다. M0 소아 사후 평가 `M0/pediatric_validation_selected.json`의 status와 checkpoint SHA는 선정 M0와 일치한다. 성인·소아 각 16 case×7장기 점수는 finite·0–1이고 저장 macro/장기 평균과 재계산이 일치한다.
+- 이번 seed의 소아 macro Dice M0/M1/M2는 0.6526407970683721/0.8121647617357254/0.671741235915599, 성인 macro는 0.9310043910587572/0.8919542415141662/0.9340860732975896이다. 같은 case에서 소아 M1−M2 +0.14042352582012627, M1−M0 +0.15952396466735336; 성인 M1−M0 −0.03905014954459102, M2−M0 +0.0030816822388322965다. 소아 M1−M0/M1−M2는 7/7장기 평균·16/16 case macro에서 양수이고, 성인 M1−M0는 16/16 case macro에서 음수다.
+- 선정 M0의 소아 macro는 앞선 세 seed보다 낮다. 이번 M1−M0가 더 큰 점수를 소아 적응의 안정적 강화로 단정하지 않고 낮은 baseline의 영향과 함께 보고한다. 고정 성인 validation에 따른 선정은 유지하며 소아 점수를 이유로 M0를 다시 고르지 않는다.
+- `scripts/02_summarize_development.py`가 M0 selected checkpoint의 update를 총 학습 예산과 비교하던 오류를 발견했다. 앞선 세 seed는 마지막 checkpoint가 selected여서 드러나지 않았으나 이번 정상적인 27,500 선정에서 실패했다. selected update를 완료 status의 best_update와 비교하도록 수정하고, 완료 예산 확인의 잘못된 chained inequality도 개별 비교로 수정했다. 학습·평가·선정 규칙과 기존 결과 파일은 변경하지 않았다.
+- 수정 후 4-seed 전체 integrity/동일 입력/점수 검산이 통과했다. 결과는 `outputs/training_abdominal_v1_seed20261101/replication_validation.json`, SHA-256 `6cf26f9360352b72ed4f058fd6ca2ecf355eda7fe9a1fb0715820908a74a32b3`에 보존한다. 4-seed 평균 소아 M1−M2 +0.13295980502180194, M1−M0 +0.12423482233416641, 성인 M1−M0 −0.03351521746412807이다. 모두 동일 development validation에 조건부인 탐색 결과다.
+- 세 번째 seed 20261031의 M0 상세 기록을 재확인한 결과 32,500~42,500 updates에서 우부신 평균 Dice가 0, 45,000에서 0.7714, 선정 50,000에서 0.8465로 회복했다. 이는 앞선 '후반 성능 하락' 관찰의 구체화이며 기전은 미확정이다. 네 번째 seed의 양 부신 최종 미회복과 함께 학습 안정성 한계로 보존한다.
+- 수정된 집계기로 기존 3-seed 보고서를 다시 계산했고 `existing_identical_report`로 원본 결과와 완전히 일치했다. 기존 3-seed 보고서 SHA-256도 `8e76aaaea3db4d89fd79d6262c6445e819954b35036659917dcf7a52411abc53`로 유지됐다.
+
+## 2026-11-20 — seed 20261102 VS Code 종료 후 재개 전 점검
+
+- 사용자가 학습 중 VS Code를 종료했다고 보고했다. 점검 시 `tsv3.training` 프로세스가 없고 run lock을 획득할 수 있었다. run/M1 status의 `running`은 종료 전 남은 기록으로, 살아 있는 학습을 뜻하지 않는다. 마지막 로그는 18:32 KST M1 update 2,000이며 해당 validation 완료 기록은 없었다.
+- M0는 50,000 updates 완료, 선정 update 50,000, 성인 validation macro Dice 0.9379156481004526이다. 선정 checkpoint SHA-256 `7004dd4532ca96f8212347ad9165d28b82f74720e72c2f2099bfdb5ab1f4d968`이 완료 status와 일치한다. M1의 마지막 저장 checkpoint는 update 1,750이며 SHA-256 `50fef9a7fdc3a7c7783f17640ac64907cad87940b78bdab2a59584a0f4451245`다. 2,000에서 validation 후 checkpoint를 저장하는 순서 때문에 재개 시 250 updates를 다시 수행한다. M2는 미시작이다.
+- M0 selected와 M1 latest를 CPU에서 완전히 로드해 model/optimizer tensor가 모두 finite이고 config·provenance가 현재 실행과 일치함을 확인했다. M1의 parent checkpoint/state hash도 선정 M0와 일치한다. Optimizer·scaler·RNG·trainer state가 보존돼 있다. 기록 loss 2,080개는 모두 finite였다. Study·uv.lock·학습 source·source snapshot hash가 기존 run 기록과 일치하며 C: 여유는 약 69 GiB였다.
+- 기존 명령에 `--resume`을 붙여 사용자가 재개한다. M0 완료 checkpoint를 복원한 뒤 M1 update 1,750부터 계속하고 M2까지 자동 진행한다. 이 점검에서는 학습을 실행하거나 설정·checkpoint를 수정하지 않았다.
+
+## 2026-11-24 — 5-seed 완료 검산 및 README 결과 갱신
+
+- 계획된 5 seed의 run/M0/M1/M2 완료와 M0 소아 사후 평가 파일을 확인했다. 마지막 seed 20261102도 50,000/5,000/5,000 successful updates 완료, M0 선정 50,000, AMP skip 13/0/0이다. 소아 M0/M1/M2 macro Dice는 0.712371/0.815344/0.695490, 성인은 0.937916/0.905380/0.937646이다.
+- 집계 명령을 5 seed 전체에 다시 실행해 예산·selected checkpoint SHA·같은 M0 분기·동일 numeric config 및 입력 identity·case 점수 검산을 통과했고, 기존 보고서와 `existing_identical_report`로 일치했다. 보고서 `outputs/training_abdominal_v1_seed20261102/replication_validation.json` SHA-256은 `c2b41bf5bc9b58cb7045f59b82dc27a026166e93f15e58f68c5194fedf32628e`다.
+- 5-seed 평균±표본 SD: 소아 M1−M2 +0.130339±0.011207, M1−M0 +0.119982±0.022547, 성인 M1−M0 −0.033319±0.003250. 모든 seed에서 소아 두 비교의 7/7장기 평균·16/16 case macro가 양수이고 성인 M1−M0의 16/16 case macro는 음수다. 같은 validation 16 case를 반복 사용한 탐색 결과이며 seed를 독립 환자로 세지 않는다.
+- README의 seed별 macro, paired 효과, 장기별 5-seed 집계, bootstrap 범위, 완료 상태와 학습 안정성·중단 이력을 갱신했다. 기존 3-seed 그림은 중간 결과임을 표시해 보존했다. 공식 test 결과는 아직 없으며 고정 평가 계약에 따른 test Dice·NSD·HD95 평가가 남아 있다. 이번 작업에서 학습이나 test 추론, 원격 push는 수행하지 않았다.
+
+## 2026-11-24 — 남은 로드맵 명시 및 원격 공개 준비
+
+- 사용자 요청에 따라 현재까지의 코드·결과 요약·실험 기록을 원격 main에 반영한다. 기존 정책대로 원본 CT·cache·case별 manifest/점수·checkpoint는 Git에서 제외하고 로컬에 보존한다. 집계 코드 수정, 실행·장애 기록, 5-seed 결과와 로드맵을 나누어 커밋한다.
+- README에 완료한 설계/QC/split/전처리/5-seed 학습/development 집계와 남은 test 실행 경로 구현·통합 시험→고정 15모델 test 평가→장기별 효과·성인 변화·민감도 분석→최종 보고·보존을 명시했다. Metric 함수와 평가 계약은 기존 구현을 재사용하고, 전체 test 실행기는 아직 구현·통합 검증이 필요함을 구분했다. Test 결과를 이용한 재튜닝이나 seed 선택은 하지 않는다.
+- `unittest discover -s tests -q` 37개가 통과했다. 기존 surface-distance의 SciPy deprecation warning은 있으나 실패는 없다. Fetch 후 원격 main과 로컬 HEAD의 선행/후행은 0/0으로 확인했다. 이번 작업에서 학습이나 test 추론은 실행하지 않는다.
