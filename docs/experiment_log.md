@@ -417,3 +417,4 @@
 - 사용자 요청에 따라 현재까지의 코드·결과 요약·실험 기록을 원격 main에 반영한다. 기존 정책대로 원본 CT·cache·case별 manifest/점수·checkpoint는 Git에서 제외하고 로컬에 보존한다. 집계 코드 수정, 실행·장애 기록, 5-seed 결과와 로드맵을 나누어 커밋한다.
 - README에 완료한 설계/QC/split/전처리/5-seed 학습/development 집계와 남은 test 실행 경로 구현·통합 시험→고정 15모델 test 평가→장기별 효과·성인 변화·민감도 분석→최종 보고·보존을 명시했다. Metric 함수와 평가 계약은 기존 구현을 재사용하고, 전체 test 실행기는 아직 구현·통합 검증이 필요함을 구분했다. Test 결과를 이용한 재튜닝이나 seed 선택은 하지 않는다.
 - `unittest discover -s tests -q` 37개가 통과했다. 기존 surface-distance의 SciPy deprecation warning은 있으나 실패는 없다. Fetch 후 원격 main과 로컬 HEAD의 선행/후행은 0/0으로 확인했다. 이번 작업에서 학습이나 test 추론은 실행하지 않는다.
+- 코드 수정 `3d8a2a7`, 실험 이력 `c712ad4`, 5-seed 결과·로드맵 `4cf8c48`의 세 커밋을 원격 main에 push했다. 첫 시도는 활성 GitHub 계정 mascot-vicky의 권한 부족(403)으로 실패했고, 이미 등록된 저장소 소유자 Laplace-tech 계정으로 전환한 뒤 성공했다. README 5-seed macro 표도 원본 JSON과 소수점 6자리까지 대조해 일치했다. 이 push 이력을 별도 후속 커밋으로 보존한다.
