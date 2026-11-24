@@ -81,7 +81,7 @@ def summarize(seeds, study_path=ROOT / "configs/study.json"):
             status = read_json(status_path)
             config = branch_config(run["study_snapshot"], model, False, seed)
             budget = config["optimizer_updates"]
-            if (status["status"] != "complete" or status["updates"] != status["budget"] != budget
+            if (status["status"] != "complete" or status["updates"] != budget or status["budget"] != budget
                     or status.get("error")):
                 raise ValueError(f"Incomplete branch: {seed}/{model}")
             common_config = {key: value for key, value in config.items() if key != "seed"}
@@ -98,8 +98,8 @@ def summarize(seeds, study_path=ROOT / "configs/study.json"):
             scores[str(seed)][model], arrays[seed][model] = {}, {}
 
             selected_update = status["trainer_state"]["best_update"] if model == "M0" else budget
-            if selected_update is None:
-                raise ValueError(f"No M0 selected update: {seed}")
+            if type(selected_update) is not int or not 0 < selected_update <= budget:
+                raise ValueError(f"Invalid selected update: {seed}/{model}")
             validation_path = directory / model / f"validation_{selected_update:06d}.json"
             validation = read_json(validation_path)
             inputs[str(validation_path.relative_to(ROOT))] = digest(validation_path)
@@ -124,7 +124,8 @@ def summarize(seeds, study_path=ROOT / "configs/study.json"):
         m0_checkpoint = directory / "M0/selected.pt"
         m0_payload = torch.load(m0_checkpoint, map_location="cpu", weights_only=False)
         m0_state_sha = state_hash(m0_payload["model"])
-        if (m0_payload["updates"] != integrity[str(seed)]["budget_updates"]["M0"]
+        m0_status = read_json(directory / "M0/status.json")
+        if (m0_payload["updates"] != m0_status["trainer_state"]["best_update"]
                 or m0_payload["config"] != branch_config(run["study_snapshot"], "M0", False, seed)):
             raise ValueError(f"M0 selected checkpoint content differs: {seed}")
         del m0_payload
