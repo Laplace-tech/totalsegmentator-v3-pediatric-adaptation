@@ -89,32 +89,21 @@ TotalSegmentator CT V3.0.0 [3]의 성인 학습군에서 3D PlainConvUNet을 무
 
 **학습 손실함수.** 세 모델 모두 유효 voxel에 대한 cross-entropy에서 전경 7개 장기의 평균 soft Dice를 뺀 값을 최소화하였다. 두 항의 가중치는 각각 1이다.
 
-<img src="docs/figures/training_loss_equations.png" width="340" alt="총 손실은 cross-entropy에서 장기별 soft Dice의 평균을 뺀 값이다. Cross-entropy는 유효 voxel의 정답 클래스 음의 로그 확률 평균이며, 장기별 soft Dice는 예측과 정답의 곱의 합을 두 배 한 값을 예측과 정답의 합으로 나눈다. 분자와 분모에 각각 ε를 더한다." />
+```math
+\mathcal{L} = \mathcal{L}_{\mathrm{CE}} - \frac{1}{C}\sum_{c=1}^{C} D_c^{\mathrm{soft}}
+```
+
+```math
+\mathcal{L}_{\mathrm{CE}} = -\frac{1}{\lvert V\rvert}\sum_{i\in V}\log p_{i,y_i}
+```
+
+```math
+D_c^{\mathrm{soft}} = \frac{2\sum_{i\in V}p_{ic}g_{ic}+\varepsilon}{\sum_{i\in V}p_{ic}+\sum_{i\in V}g_{ic}+\varepsilon}
+```
 
 여기서 <i>C</i> = 7은 전경 장기 수이며, <i>V</i>는 정답 클래스 <i>y</i><sub>i</sub>가 무시값 8이 아닌 voxel의 집합이다. <i>p</i><sub>ic</sub>는 voxel <i>i</i>가 클래스 <i>c</i>에 속할 softmax 예측 확률이고, <i>g</i><sub>ic</sub>는 정답 클래스가 <i>c</i>이면 1, 그 밖에는 0인 지시변수이다. 평활화 상수는 ε = 10⁻⁵이다.
 
 Cross-entropy에는 배경과 7개 전경 장기를 포함하였다. Soft Dice는 전경 장기에 대해서만 평균하였다. 마스크 겹침과 patch 패딩에 해당하는 voxel은 두 항에서 모두 제외하였다. [학습 구현](src/tsv3/training.py#L75)
-
-<details>
-<summary>손실함수 LaTeX 원문</summary>
-
-```latex
-\[
-\mathcal{L} = \mathcal{L}_{\mathrm{CE}} - \frac{1}{C}\sum_{c=1}^{C} D_c^{\mathrm{soft}}
-\]
-
-\[
-\mathcal{L}_{\mathrm{CE}} = -\frac{1}{\lvert V\rvert}\sum_{i\in V}\log p_{i,y_i}
-\]
-
-\[
-D_c^{\mathrm{soft}} = \frac{2\sum_{i\in V}p_{ic}g_{ic}+\varepsilon}{\sum_{i\in V}p_{ic}+\sum_{i\in V}g_{ic}+\varepsilon}
-\]
-```
-
-[기존 수식 이미지](docs/figures/training_loss.png)
-
-</details>
 
 ### 2.3 핵심 아이디어
 
