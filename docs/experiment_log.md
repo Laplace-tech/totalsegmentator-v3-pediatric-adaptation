@@ -418,3 +418,24 @@
 - README에 완료한 설계/QC/split/전처리/5-seed 학습/development 집계와 남은 test 실행 경로 구현·통합 시험→고정 15모델 test 평가→장기별 효과·성인 변화·민감도 분석→최종 보고·보존을 명시했다. Metric 함수와 평가 계약은 기존 구현을 재사용하고, 전체 test 실행기는 아직 구현·통합 검증이 필요함을 구분했다. Test 결과를 이용한 재튜닝이나 seed 선택은 하지 않는다.
 - `unittest discover -s tests -q` 37개가 통과했다. 기존 surface-distance의 SciPy deprecation warning은 있으나 실패는 없다. Fetch 후 원격 main과 로컬 HEAD의 선행/후행은 0/0으로 확인했다. 이번 작업에서 학습이나 test 추론은 실행하지 않는다.
 - 코드 수정 `3d8a2a7`, 실험 이력 `c712ad4`, 5-seed 결과·로드맵 `4cf8c48`의 세 커밋을 원격 main에 push했다. 첫 시도는 활성 GitHub 계정 mascot-vicky의 권한 부족(403)으로 실패했고, 이미 등록된 저장소 소유자 Laplace-tech 계정으로 전환한 뒤 성공했다. README 5-seed macro 표도 원본 JSON과 소수점 6자리까지 대조해 일치했다. 이 push 이력을 별도 후속 커밋으로 보존한다.
+
+## 2026-11-26 — 공식 test 실행 경로 구현 및 사전 검증
+
+- 기존 `tsv3.evaluation`에 preflight, development smoke, 공식 test 실행 경로를 추가했다. 학습 완료 보고서와 15개 selected checkpoint의 identity·해시를 검증하고, CT별 원본 파일 해시 확인 후 canonical RAS에서 추론하고 원본 voxel grid로 복원한다. 기존 M0 학습 전용 정규화와 고정 metric 함수·eligibility를 사용한다.
+- SQLite에 model–case 단위로 점수를 저장하며 재실행 시 동일 입력·코드·실행 환경의 완료 작업을 건너뛴다. 1,620개 작업 완료 후 장기별 Dice·NSD(2 voxel)·HD95(voxel), paired 평균·seed SD·case bootstrap, empty prediction 전이, 민감도 및 탐색 분석을 `summary.json`과 `report.md`로 집계한다. HD95 다중 seed paired 종합은 모든 seed에서 양쪽 모두 유한한 공통 사례에 조건부이며, seed별 유한 분모와 실패 전이는 별도 기록한다.
+- 사전 검사에서 성인 88·소아 20건, 15개 checkpoint, 평가 계약과 폴더의 원본 파일 크기를 확인했다. 실제 development 성인·소아 각 1건의 전체 추론·평가·SQLite 저장 round-trip은 각각 15.07초·2.49초, CUDA reserved 최고 1,294 MiB였다. Test QC shape로 tile 수·voxel 수를 환산한 본 평가 추정은 약 3.5시간이며 실측 종료 시간은 아니다. 축 교환·반전 복원, 저장 재개, 빈 예측의 HD95 paired 분모 검증을 포함해 테스트 40개가 통과했다.
+- 사용자에게 `.venv/bin/python -u -m tsv3.evaluation --official-test --host-volume /mnt/c`를 전달했다. 테스트 결과가 생성되면 development 결과와 함께 해석하고 보고한다.
+
+## 2026-11-26 — 공식 test 완료·최종 검산
+
+- `outputs/test_abdominal_v1/`의 공식 평가가 완료됐다. 선정 모델 15개 × CT 108건(성인 88, 소아 20)의 1,620개 model–case과 11,340개 장기 기록이 모두 존재한다. SQLite 무결성 및 모든 레코드의 장기 구성·reference voxel 수·거리 단위·지표 범위·빈 reference/예측 규칙을 검산했다. SQLite 원자료 재집계와 `summary.json`이 일치했다. 재실행한 preflight의 15개 checkpoint 및 평가 입력·코드 identity도 결과 identity와 같다. `summary.json` SHA-256 `a80603a38a300b1ba059d3e6828197e4e638f651d19bf9dedf1b99403adf192f`.
+- 주 분석의 7장기 균등평균 Dice는 소아 M0/M1/M2 0.711573/0.812937/0.710218, 성인 0.912479/0.877970/0.913124다. 소아 M1−M2 +0.102719±0.015148, M1−M0 +0.101364±0.029418, 성인 M1−M0 −0.034509±0.003412, M2−M0 +0.000645±0.002269(5 seed 평균±표본 SD). 소아 M1−M2와 성인 M1−M0의 macro 방향은 5/5 seed에서 일치한다. 장기별 적격 case가 다르며 seed별 점수는 동일 case의 반복이다.
+- 소아 M1−M2 Dice 차이는 장기 순서 간/비장/좌신장/우신장/췌장/좌부신/우부신에 +0.014119/+0.019092/+0.024698/+0.019819/+0.102293/+0.359280/+0.179733이다. 모든 장기 평균이 양수이고 비장은 4/5, 나머지는 5/5 seed 양수다. 양 부신이 7장기 균등평균 이득의 약 75%를 차지한다. 7장기 모두 적격인 같은 소아 5건에서 +0.102935, 경계 접촉을 포함한 nonempty 민감도 분석에서 +0.097672였다. 성인 M1−M0는 전 장기 평균 음수이며 좌우 부신 감소가 가장 컸다.
+- 소아 M1−M2에서 NSD는 7개 장기 평균이 양수였고 비장의 pointwise bootstrap 범위는 0을 포함했다. 공통 유한쌍 HD95 평균은 6/7장기에서 감소했으며 비장은 +15.04 voxel로 증가했다. 주 분석 소아의 빈 예측은 M0/M1/M2 각각 8/4/11개 seed–case–장기 기록이다. M2 대비 M1의 실패→유한 8건, 유한→실패 1건, 양쪽 모두 실패 3건을 HD95 유한쌍과 구분한다.
+- Development에서 본 장기별 이득 및 성인 성능 저하의 방향이 공식 test에서도 관측됐다. Test 적격 사례·마스크 처리 규칙과 development가 다르므로 두 macro 차이의 크기를 일반화 격차로 해석하지 않는다. 소아 장기별 n=6–9, 환자 연결 정보 부재, 제한된 공개 라벨 QC 및 기관·촬영 조건의 차이로 결론을 해당 코호트에 한정한다. 결과 판독용 Figure 2를 `outputs/test_abdominal_v1/figure2_official_test_dice.png`에 보존했다.
+
+## 2026-11-26 — 팀 인수인계와 실험 기록 배포
+
+- 팀에서 기말보고서를 작성할 수 있도록 README에 양식의 5장별 자료 안내, 중간발표 대비 변경, 실험 구조도, 공식 test 절대 Dice·seed별·장기별 차이, 경계 지표와 한계, 인용원, 재현 절차를 정리했다. 공식 test Figure 2를 `docs/figures/official_test_dice.png`에 포함했다.
+- 최종 `v1.0.0-study` Release용 아카이브를 준비했다. Evidence에 감사·QC·검토·분할·평가 계약, 원점수 DB, seed별 결과·로그·스냅샷·정규화·cache 검증 등 261개 파일을 보존했다. 별도 seed tar 5개에 선정본 15개와 보존된 재개·이관본 13개를 포함했다. 자산별 SHA-256을 제공한다. 원본 CT와 라벨은 Zenodo V3.0.0 공식 배포본을 연결하며 파생 배열 cache는 재생성 방법을 문서화했다.
+- `unittest discover -s tests -q` 40개와 `git diff --check`가 통과했다. 평가 설정·checkpoint·점수 원본에는 변경을 가하지 않았다.
