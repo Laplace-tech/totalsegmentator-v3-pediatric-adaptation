@@ -94,7 +94,7 @@ D_c^{\mathrm{soft}}
 \end{aligned}
 $$
 
-여기서 $C=7$은 전경 장기 수, $V=\{i\mid y_i\ne8\}$는 유효 voxel 집합이다. $y_i$는 voxel $i$의 정답 클래스, $p_{ic}$는 클래스 $c$의 softmax 예측 확률, $g_{ic}=\mathbf{1}[y_i=c]$는 해당 클래스의 이진 정답 표시이다. $\varepsilon=10^{-5}$는 평활화 상수이다. 장기 마스크가 겹치거나 patch를 패딩한 위치에는 값 8을 부여하여 두 손실 항에서 제외하였다. Cross-entropy의 정답 클래스는 배경 0과 장기 1~7을 포함하고, Soft Dice는 장기 1~7을 평균하였다. [수식 이미지](docs/figures/training_loss.png) · [학습 구현](src/tsv3/training.py#L75)
+여기서 $C=7$은 전경 장기 수, $V$는 정답 클래스 $y_i$가 8이 아닌 voxel $i$의 집합이다. $p_{ic}$는 클래스 $c$의 softmax 예측 확률, $g_{ic}=\mathbf{1}[y_i=c]$는 해당 클래스의 이진 정답 표시이다. $\varepsilon=10^{-5}$는 평활화 상수이다. 장기 마스크가 겹치거나 patch를 패딩한 위치에는 값 8을 부여하여 두 손실 항에서 제외하였다. Cross-entropy의 정답 클래스는 배경 0과 장기 1~7을 포함하고, Soft Dice는 장기 1~7을 평균하였다. [수식 이미지](docs/figures/training_loss.png) · [학습 구현](src/tsv3/training.py#L75)
 
 ### 2.3 핵심 아이디어
 
