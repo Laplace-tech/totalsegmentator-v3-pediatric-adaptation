@@ -80,6 +80,22 @@ TotalSegmentator CT V3.0.0 [3]의 성인 학습군에서 3D PlainConvUNet을 무
 | 시험 추론 | Sliding window, tile step 0.5. 각 patch의 기본 방향에서 얻은 출력을 Gaussian 가중으로 결합하고, voxel별 최고 점수 클래스를 최종 분할로 사용 |
 | 실험 환경 | WSL2, Python 3.12, PyTorch 2.8.0+cu126, nnU-Net v2.8.1, NVIDIA GeForce RTX 3060 Ti, FP16 혼합정밀도 |
 
+**손실함수.** M0·M1·M2의 학습에 다음 식을 동일하게 적용하였다.
+
+$$
+\begin{aligned}
+\mathcal{L}
+&= \mathcal{L}_{\mathrm{CE}} - \frac{1}{C}\sum_{c=1}^{C} D_c^{\mathrm{soft}},\\[4pt]
+\mathcal{L}_{\mathrm{CE}}
+&= -\frac{1}{|V|}\sum_{i\in V}\log p_{i,y_i},\\[4pt]
+D_c^{\mathrm{soft}}
+&= \frac{2\sum_{i\in V}p_{ic}g_{ic}+\varepsilon}
+        {\sum_{i\in V}p_{ic}+\sum_{i\in V}g_{ic}+\varepsilon}.
+\end{aligned}
+$$
+
+여기서 $C=7$은 전경 장기 수, $V=\{i\mid y_i\ne8\}$는 유효 voxel 집합이다. $y_i$는 voxel $i$의 정답 클래스, $p_{ic}$는 클래스 $c$의 softmax 예측 확률, $g_{ic}=\mathbf{1}[y_i=c]$는 해당 클래스의 이진 정답 표시이다. $\varepsilon=10^{-5}$는 평활화 상수이다. 장기 마스크가 겹치거나 patch를 패딩한 위치에는 값 8을 부여하여 두 손실 항에서 제외하였다. Cross-entropy의 정답 클래스는 배경 0과 장기 1~7을 포함하고, Soft Dice는 장기 1~7을 평균하였다. [수식 이미지](docs/figures/training_loss.png) · [학습 구현](src/tsv3/training.py#L75)
+
 ### 2.3 핵심 아이디어
 
 미세조정에 사용한 코호트에 따른 차이를 비교하기 위해 초기 가중치와 학습 예산을 통제하였다. 각 학습 seed에서 선정한 M0의 가중치를 M1과 M2에 똑같이 불러오고, optimizer는 두 모델에서 각각 새로 초기화한 뒤 모든 층을 갱신하였다. M2용 성인 CT 32건을 M0 학습에서 미리 분리하였으므로, 두 모델은 모두 M0 학습에 쓰이지 않은 CT 32건으로 각각 5,000 updates를 수행하였다.
