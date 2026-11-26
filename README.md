@@ -1,9 +1,167 @@
-# TotalSegmentator V3 Pediatric Adaptation
+# 성인 CT 기반 복부 분할 모델의 소아 데이터 미세조정 효과에 대한 장기별 이질성 분석
+
+*Organ-Wise Heterogeneity in the Effects of Fine-Tuning Adult-Trained Abdominal CT Segmentation Models on Pediatric Data*
 
 성인 CT 학습 모델을 소아 CT에 적응시켰을 때 **장기별 개선량이 얼마나 다른가**를 분석하는
 학부 연구 프로젝트다. TotalSegmentator CT V3 공개 데이터의 7개 복부 장기를 사용한다.
 환자 ID가 제공되지 않아 **case 단위 탐색 연구**로 설계했고, 공개 reference mask의 자동 QC와
 제한된 수동 검토를 거쳤다. 결정과 실행 이력은 [연구 실행 기록](docs/experiment_log.md)에 남겼다.
+
+**최종 상태: 5개 학습 seed × 3개 모델의 학습, 공식 test 1,620회 평가 및 결과 검산 완료.**
+공식 소아 test에서 M1이 동일 예산 성인 미세조정 M2보다 **10.27 Dice점** 높았다.
+좌부신 **+35.93점**, 우부신 **+17.97점**, 췌장 **+10.23점**으로 이득이 집중됐다.
+성인 test에서 M1은 성인 기준 M0보다 **3.45점** 낮았다. 두 macro 변화 방향은 5개 seed 모두에서 같았다.
+1 Dice점은 원점수 0.01이다.
+
+## 기말보고서 작성 자료
+
+표지·참고문헌을 제외한 본문 8쪽을 2–2–1–2–1쪽으로 배분한다. 실제 조원·역할·제출일은 팀에서 작성한다.
+아래 표는 실험 자료의 위치와 해당 절에 들어갈 내용을 연결한다.
+
+| 보고서 절 | 본문에 가져갈 내용 | 근거 자료 |
+|---|---|---|
+| **1. 주제 선정배경** | 성인 학습 모델의 소아 적용 격차, 평균 Dice가 가리는 장기별 차이. 입력은 3D CT, 출력은 배경과 7개 복부 장기의 voxel 분할. 질문은 동일 추가 학습 예산에서 소아 CT 사용 효과가 장기마다 얼마나 다른가이다. | [배경·인용 자료](#배경과-참고문헌), [중간발표 대비 변경](#중간발표-대비-실험-결정) |
+| **2. AI 아이디어 구체화** | 그림 1에 QC·split과 배열 전처리를 따로 표시한다. M0의 선정 가중치에서 M1·M2로 분기하고, 정규화와 학습 설정을 공통 적용한다. | [실험 구조도](#그림-1-실험-구조), [모델·학습 설정](#본-학습-설정), [전처리](#공유-전처리-기록) |
+| **3. 비교군 선정** | M0은 성인 기준, M1은 소아 적응, M2는 추가 학습 자체에 대한 동일 예산 대조군. 주 비교는 소아 M1−M2. Dice는 겹침, NSD·HD95는 경계 정합성을 평가한다. | [비교군](#연구-질문과-비교군), [지표·적격 기준](#고정된-평가-규칙) |
+| **4. 실험 및 결과** | 표에 분할별 건수와 공식 test의 장기별 적격 `n`을 적는다. 그림 2로 소아 이득·성인 변화, 표로 소아 절대 Dice와 경계 지표를 제시한다. 5개 seed별 값을 함께 확인한다. | [분할](#고정-데이터-배정), [공식 test 결과](#공식-test-결과), [그림 2](docs/figures/official_test_dice.png), [실험 산출물 Release](https://github.com/Laplace-tech/totalsegmentator-v3-pediatric-adaptation/releases/tag/v1.0.0-study) |
+| **5. 결론** | 소아 이득의 장기별 차이 → 성인 성능 변화 → 소아 소표본·환자 연결 부재·촬영 조건 및 라벨 한계. 관측된 차이는 이 코호트의 기술적 결과로 해석한다. | [해석과 한계](#해석과-한계), [최종 검산 기록](docs/experiment_log.md) |
+
+### 중간발표 대비 실험 결정
+
+표 2를 작성할 때 실제 제출한 중간발표 자료에서 언급한 내용과 대조한다.
+
+| 항목 | 초기 계획 | 최종 실험 | 결정 근거 |
+|---|---|---|---|
+| 데이터·비교군 | TotalSegmentator CT V3, M0·M1·M2 | 동일 설계를 유지하고 7개 복부 장기로 범위를 고정 | 전체 패널 시험과 별도로 복부 장기별 비교 범위를 확정 |
+| 추가 학습량 | 군당 128건 잠정 | 소아 32건·성인 32건 | 기술 QC와 장기 적격 기준을 통과한 소아 개발 후보가 54건. 학습 32건, validation 16건, 미배정 6건 |
+| 분할 | 환자 단위 계획 | case 단위 분할 및 정확한 중복 CT 격리 | 공개 배포본에서 환자 연결 ID를 확인할 수 없음 |
+| 반복 | 첫 seed 후 반복 여부 판단 | 같은 split에서 독립 학습 seed 5개 | 첫 개발 결과를 확인한 뒤 공식 test 추론 전에 전체 seed를 선언하여 학습 난수에 대한 안정성 평가 |
+| 거리 측정 | Dice·NSD·HD95 | 지표 유지. NSD 2 voxel, HD95 voxel 단위 | 원본 NIfTI의 물리적 공간 단위를 검증할 수 없어 index grid 사용 |
+
+### 그림 1 실험 구조
+
+```mermaid
+flowchart TD
+    RAW["TotalSegmentator CT V3<br/>3D CT와 공개 장기 마스크"] --> QC["기술 QC·정확한 CT 중복 격리<br/>성인·소아 case 분할 고정"]
+    QC --> DEV["Development 673건<br/>RAS 재배향·원래 격자 유지"]
+    QC --> TEST["공식 test CT 108건<br/>장기별 평가 적격 사전 고정"]
+    DEV --> M0["M0 성인 577건 · 50,000 updates<br/>성인 validation으로 checkpoint 선정"]
+    DEV --> NORM["M0 학습 577건만으로 공통 정규화 적합"]
+    NORM --> M0
+    M0 --> M1["M1 소아 32건 · 5,000 updates"]
+    M0 --> M2["M2 별도 성인 32건 · 5,000 updates"]
+    M0 --> EVAL["동일 적격 사례에서 paired 비교<br/>Dice · NSD · HD95"]
+    M1 --> EVAL
+    M2 --> EVAL
+    TEST --> EVAL
+```
+
+고정 split seed는 `20261029`다. 학습 seed는 `20261029`, `20261030`, `20261031`, `20261101`, `20261102`로,
+각 seed에서 M0부터 학습한 뒤 동일한 선정 M0를 M1·M2의 출발점으로 사용한다.
+
+### 공식 test 결과
+
+성인 88건·소아 20건에 선정 모델 15개를 적용해 **1,620개 모델–CT 조합**과 **11,340개 장기 기록**을 저장했다.
+점수는 장기별 적격 사례를 먼저 평균하고, 요약 Dice에서는 7장기에 같은 가중치를 준다.
+아래 수치는 slice 수, voxel 수, 전체 CT 수로 가중한 평균이 아니다.
+
+| 학습 seed | 소아 M0 | 소아 M1 | 소아 M2 | 소아 Δ M1−M2 | 소아 Δ M1−M0 | 성인 M0 | 성인 M1 | 성인 M2 | 성인 Δ M1−M0 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 20261029 | 0.7077 | 0.8174 | 0.6940 | +12.34 | +10.97 | 0.9119 | 0.8791 | 0.9162 | −3.28 |
+| 20261030 | 0.7300 | 0.8144 | 0.7234 | +9.11 | +8.44 | 0.9174 | 0.8797 | 0.9162 | −3.77 |
+| 20261031 | 0.7282 | 0.8137 | 0.7181 | +9.57 | +8.55 | 0.9149 | 0.8838 | 0.9155 | −3.10 |
+| 20261101 | 0.6556 | 0.8049 | 0.6909 | +11.40 | +14.93 | 0.9048 | 0.8662 | 0.9037 | −3.86 |
+| 20261102 | 0.7363 | 0.8142 | 0.7248 | +8.94 | +7.79 | 0.9135 | 0.8811 | 0.9140 | −3.24 |
+| **5개 seed 평균** | **0.7116** | **0.8129** | **0.7102** | **+10.27** | **+10.14** | **0.9125** | **0.8780** | **0.9131** | **−3.45** |
+
+Δ는 Dice점이다. 5개 seed의 표본 SD는 소아 M1−M2 **1.51점**, 소아 M1−M0 **2.94점**, 성인 M1−M0 **0.34점**이다.
+성인에서 M2−M0 평균은 **+0.06점**이었다. 20261101의 소아 M1−M0 차이가 가장 컸지만 M1 절대 점수는 오히려 다섯 seed 중 가장 낮았다.
+
+| 소아 test 장기 | 주 분석 `n` | M0 Dice | M1 Dice | M2 Dice | M1−M2 Dice점 | M1−M2 NSD | M1−M2 HD95 (voxel) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 간 | 7 | 0.9388 | 0.9526 | 0.9385 | +1.41 | +0.0404 | −6.42 |
+| 비장 | 8 | 0.7966 | 0.8212 | 0.8021 | +1.91 | +0.0034 | +15.04 |
+| 좌신장 | 6 | 0.9342 | 0.9416 | 0.9169 | +2.47 | +0.0191 | −0.86 |
+| 우신장 | 6 | 0.9406 | 0.9525 | 0.9327 | +1.98 | +0.0341 | −11.28 |
+| 췌장 | 7 | 0.6523 | 0.7575 | 0.6552 | +10.23 | +0.1355 | −2.66 |
+| 좌부신 | 9 | 0.2205 | 0.6091 | 0.2498 | +35.93 | +0.3540 | −5.67 |
+| 우부신 | 8 | 0.4980 | 0.6561 | 0.4764 | +17.97 | +0.1618 | −1.48 |
+
+HD95 변화는 두 모델 모두 유한한 사례의 조건부 결과다. 췌장·좌우 부신의 공통 유한쌍은 각각 6건이다.
+소아 주 분석에서 M2의 빈 예측 11개 중 **8개가 M1에서 유한한 HD95로 전환**했고, 반대 방향은 1개, 양쪽 모두 빈 예측은 3개였다.
+빈 예측을 포함한 Dice·NSD와 유한쌍 HD95는 분모가 다를 수 있다.
+
+| 소아 M1−M2 Dice점 | 20261029 | 20261030 | 20261031 | 20261101 | 20261102 |
+|---|---:|---:|---:|---:|---:|
+| 간 | +1.54 | +1.27 | +1.25 | +1.47 | +1.54 |
+| 비장 | +2.05 | −0.61 | +1.76 | +5.86 | +0.49 |
+| 좌신장 | +7.33 | +0.63 | +2.25 | +1.23 | +0.91 |
+| 우신장 | +1.58 | +1.88 | +1.00 | +2.97 | +2.49 |
+| 췌장 | +10.17 | +9.35 | +10.33 | +11.95 | +9.35 |
+| 좌부신 | +45.67 | +32.04 | +36.38 | +31.17 | +34.38 |
+| 우부신 | +18.04 | +19.19 | +14.00 | +25.19 | +13.45 |
+
+![공식 test 장기별 paired Dice 차이와 사례 수](docs/figures/official_test_dice.png)
+
+그림 2. 소아 M1−M2와 성인 M1−M0의 장기별 평균 Dice점. 오차막대는 각 장기의 paired case bootstrap 95% 구간이며
+seed 간 SD와 분리한다. 두 패널의 x축 범위는 다르다. 모든 성인 장기의 M1−M0 평균 Dice가 낮았고 좌부신 −7.65점, 우부신 −7.86점이 가장 컸다.
+
+### 해석과 한계
+
+- 주 비교에서 **양 부신이 7장기 균등평균 이득의 약 75%**를 차지했다. 양 부신과 췌장은 모든 seed에서 이득 상위 3개였다. 비장은 한 seed에서 M1이 M2보다 낮았다. 좌부신은 소아 미세조정 후에도 절대 Dice가 약 0.61이었다.
+- 주 분석의 소아 M1−M2는 +10.27점이다. 경계 접촉 라벨을 포함하면 +9.77점, **7장기 모두 적격인 동일 소아 5건**만 쓰면 +10.29점이었다. 이 두 분석에서도 양 부신의 이득이 가장 컸다.
+- 소아 NSD의 장기별 평균 차이는 모두 양수였다. 비장은 Dice 평균이 개선됐지만 HD95 평균이 증가했고 해당 HD95 구간은 0을 포함했다. 성인 Dice 저하가 모든 경계 지표에서 같은 양상으로 나타난 것은 아니다.
+- Validation 최고점이 선정된 M0를 사용했다. `20261101`은 성인 validation 최고인 27,500 updates를 선정했고, 30,000 이후 양쪽 부신 Dice가 0이 됐다. `20261031` 우부신과 `20261102` 좌부신의 후반 급락은 이후 회복했다. 원인은 미확정이다. [학습 안정성 및 검산 기록](docs/experiment_log.md)
+- 소아 주 분석은 장기별 6–9건이고, 각 seed는 같은 CT를 반복 평가한다. Case bootstrap은 seed·모델 정보를 묶어 재표집했다. 장기별 차이는 기술적 관찰이며 별도의 장기 간 가설검정 결과가 아니다.
+- 기관·촬영 조건은 군 간 완전히 통제되지 않았다. 환자 ID가 없어 반복 촬영의 독립성을 보장할 수 없고, 라벨은 공개 reference의 제한적인 기술 QC 기반이다. 외부 소아 코호트 검증과 물리적 거리 측정은 별도 과제다.
+
+### 배경과 참고문헌
+
+참고문헌 번호는 보고서 본문에서 처음 인용하는 순서에 맞춘다.
+
+- CT 다장기 분할과 공개 모델의 배경. [Wasserthal et al., *Radiology: Artificial Intelligence*, 2023](https://doi.org/10.1148/ryai.230024)
+- 성인 학습 모델의 소아 일반화와 소아 적응 선행연구. 해당 연구는 자체 외부 코호트에서 성인 0.81·소아 0.73의 평균 Dice를 보고했다. [Chatterjee et al., *Journal of Imaging Informatics in Medicine*, 2025](https://doi.org/10.1007/s10278-024-01273-w)
+- 실제 사용한 입력은 **V3.0.0**이다. 배포본은 CT 1,939개·117개 구조이며 이 가운데 7개 복부 장기를 평가 대상으로 고정했다. 원 논문은 V1의 104개 구조를 설명한다. [TotalSegmentator CT V3.0.0 · Zenodo](https://doi.org/10.5281/zenodo.22688904)
+- 모델 및 학습 구성 요소의 배경. 이 실험은 명시적으로 설정한 PlainConvUNet을 사용했다. [Isensee et al., *Nature Methods*, 2021](https://doi.org/10.1038/s41592-020-01008-z)
+- 경계 지표 구현. [DeepMind surface-distance](https://github.com/google-deepmind/surface-distance)
+
+### 산출물 다운로드 및 확인
+
+[최종 실험 GitHub Release](https://github.com/Laplace-tech/totalsegmentator-v3-pediatric-adaptation/releases/tag/v1.0.0-study)에서 파일을 받는다.
+
+| 파일 | 포함 내용 |
+|---|---|
+| `tsv3-experiment-evidence.tar.gz` | `manifests/`의 감사·QC·검토·split·공식 평가 계약과 `outputs/`의 결과·SQLite·로그·5 seed 실행 스냅샷. `data/preprocessed/`의 정규화 통계와 두 cache manifest·검증 기록 포함 |
+| `tsv3-checkpoints-<seed>.tar` 5개 | 보존된 **28개 checkpoint**. 15개 선정 모델, 후속 seed의 `latest.pt`, 첫 seed의 cache 이관 전 M0 체크포인트 포함 |
+| `SHA256SUMS.txt` | 모든 Release 자료의 다운로드 무결성 확인용 SHA-256 |
+
+보고서만 작성할 때는 evidence 아카이브면 충분하다. Git clone 루트에서 풀면 기존 디렉토리 구조를 그대로 사용한다.
+`outputs/test_abdominal_v1/report.md`는 요약 표, `summary.json`은 **seed별·장기별 전 지표와 민감도 분석**,
+`scores.sqlite`는 case별 원점수다. `summary.json`의 `seeds` 순서가 `per_seed_mean` 배열의 순서다.
+가중치가 필요한 경우 해당 seed tar를 추가로 푼다. `torch.load`를 사용하는 파일은 출처와 hash를 확인한다.
+
+```bash
+sha256sum -c SHA256SUMS.txt --ignore-missing
+tar -xzf tsv3-experiment-evidence.tar.gz
+# 해당 가중치를 내려받은 경우
+tar -xf tsv3-checkpoints-20261029.tar
+```
+
+영상 원본은 분할·정규화 자료와 분리하여 [공식 CC BY 4.0 배포본](https://doi.org/10.5281/zenodo.22688904)에서 받아
+`data/raw/Totalsegmentator_dataset_v300/`에 둔다. 약 21 GiB의 fast 배열 cache는 개발 학습을 위한 파생 파일이며,
+공식 test는 원본 CT와 선정 가중치를 사용한다. cache 재생성은 아래 [공유 전처리 기록](#공유-전처리-기록)과
+[fast cache 변환](#m0-데이터-읽기-병목-수정-2026-10-30)을 따른다. 공개 archive를 이미 푼 경우 재생성 경로는 새 디렉토리를 사용한다.
+
+```bash
+uv sync --frozen --extra training --extra review --extra evaluation
+.venv/bin/python scripts/02_summarize_development.py --seeds 20261029 20261030 20261031 20261101 20261102
+.venv/bin/python -m tsv3.evaluation --preflight
+# 공식 test 재현이 필요할 때 별도 출력 경로로 실행
+.venv/bin/python -u -m tsv3.evaluation --official-test --output outputs/test_abdominal_v1_reproduction
+# 재학습을 위한 cache 배열을 새 경로에 생성할 때만 실행
+.venv/bin/python -u -m tsv3.preprocessing --output data/preprocessed/abdominal_v1_rebuilt
+.venv/bin/python -u -m tsv3.fast_cache --source data/preprocessed/abdominal_v1_rebuilt --output data/preprocessed/abdominal_v1_fast_rebuilt
+```
 
 ## 연구 질문과 비교군
 
@@ -17,12 +175,11 @@
 
 M0는 **공식 TotalSegmentator V3 pretrained 모델이 아닌** 자체 학습 PlainConvUNet이다.
 세 모델은 성인·소아 development validation 각 16건의 동일 case에서 비교한다.
-공식 test 108건(성인 88, 소아 20)은 지금까지 추론·평가에 사용하지 않았다.
-2026-11-24 확인 기준 **5개 seed(20261029·20261030·20261031·20261101·20261102)의
-M0→M1→M2 학습과 선정 M0 소아 사후 평가를 모두 완료**했다. 공식 test 평가는 남아 있다.
+공식 test 108건(성인 88, 소아 20)은 학습·선정에서 격리했다.
+5개 seed의 학습과 development 분석을 마친 뒤, 선정된 15개 모델로 공식 test를 평가했다.
 각 seed의 M1·M2는 동일한 선정 M0에서 출발하며, seed별 결과를 별도 환자로 세지 않는다.
 
-## 현재 결과: development validation만
+## Development validation 결과
 
 아래 값은 case별 7장기 hard Dice를 평균한 macro 값이다. 모델 선택에 반복 사용된 작은 validation의
 탐색 결과이며 공식 test 성능이 아니다. M0의 소아 점수는 선정된 checkpoint를 고정한 뒤
@@ -59,7 +216,7 @@ M0→M1→M2 학습과 선정 M0 소아 사후 평가를 모두 완료**했다. 
 20261101의 비장만 소폭 상승했고 나머지는 감소했다. 양 부신이 소아 M1−M0의
 7장기 균등평균 이득 합계 중 약 70%를 차지한다. 왼쪽 신장의 M1−M2는 seed별
 +0.027679~+0.152806으로 크기 변동이 크며 첫 seed M2의 성능 하락이 영향을 주었다.
-이 패턴은 **development 관찰**이다. 보류한 test 평가 후 해석을 다시 검토한다.
+이 패턴은 **development 관찰**이다. [공식 test 결과](#공식-test-결과)는 별도 집계다.
 
 이전 3-seed 시점의 그림은 [중간 집계 그림](docs/figures/development_validation.png)으로 보존한다.
 최신 수치는 위 5-seed 표를 따른다.
@@ -82,8 +239,7 @@ validation 파일을 검산하고 paired 결과를 생성한다.
 ```
 
 결과 JSON은 `outputs/training_abdominal_v1_seed20261102/replication_validation.json`에
-보관한다. 원본 checkpoint·case별 점수와 JSON은 크기·배포 범위 때문에 Git에 올리지 않고,
-집계 표와 그림만 공개한다.
+보관한다. 실험 원점수와 checkpoint는 [Release 아카이브](#산출물-다운로드-및-확인)에서 받을 수 있다.
 
 학습 안정성 이력도 보존한다. 20261031 M0의 우부신 Dice는 32,500~42,500 updates에서
 0으로 떨어졌다가 회복했다. 20261101 M0는 30,000 이후 양 부신 Dice가 0으로 떨어져
@@ -92,7 +248,7 @@ M1·M2가 출발했다. 원인은 미확정이다. 이 seed의 낮은 소아 M0 
 영향을 주었으므로 적응 효과의 강화로 단정하지 않는다. 20261102는 VS Code 종료 후
 M1 update 1,750 checkpoint에서 재개했고 모든 branch를 완료했다.
 
-## 로드맵 — 2026-11-24 현재
+## 연구 로드맵 — 2026-11-26 완료 상태
 
 | 단계 | 상태 | 산출물·완료 조건 |
 |---|---|---|
@@ -100,14 +256,15 @@ M1 update 1,750 checkpoint에서 재개했고 모든 branch를 완료했다.
 | 2. 데이터 감사·QC·split | 완료 | 중복 CT train 측 격리, case 단위 분할·포함 제외 기록 |
 | 3. 환경·전처리·실행 검증 | 완료 | M0 전용 정규화, 공유 fast cache 673건, 재개·무결성 검사 |
 | 4. 5-seed 학습 | 완료 | 15개 모델, seed마다 M0 50,000·M1/M2 각 5,000 updates |
-| 5. Development 결과 집계 | 완료 — 현재 위치 | 각 seed 선정 M0 소아 평가, paired Dice·장기별 변화·seed SD·case bootstrap |
-| 6. 공식 test 실행 경로 구현·통합 검증 | 다음 작업 | 기존 모델·전처리·metric 재사용, 원래 CT grid 복원, 장기별 적격 mask 적용, 재개·출력 검증; development 입력으로 먼저 시험 |
-| 7. 공식 test 평가 | 대기 | 고정된 15개 selected 모델 모두 평가; 성인 88·소아 20건 중 장기별 적격 case의 Dice·NSD(2 voxel)·HD95(voxel), 실패·분모 기록 |
-| 8. Test 집계·이질성 분석 | 대기 | 장기별 M1−M2/M1−M0, 성인 변화, seed 평균·SD·case bootstrap, HD95 실패 전이·사전 지정 민감도 분석 |
-| 9. 최종 보고·보존 | 대기 | development/test 구분, 표·그림·방법·한계 정리, 코드·설정·hash·선정 모델 보존 |
+| 5. Development 결과 집계 | 완료 | 각 seed 선정 M0 소아 평가, paired Dice·장기별 변화·seed SD·case bootstrap |
+| 6. 공식 test 실행 경로 구현·통합 검증 | 완료 | 원래 CT grid 복원, 장기 mask 점수 계산, SQLite 재개, development GPU smoke |
+| 7. 공식 test 평가 | 완료 | 15개 selected 모델 × 성인 88·소아 20건, 총 1,620회 |
+| 8. Test 집계·이질성 분석 | 완료 | 장기별 M1−M2/M1−M0, 성인 변화, seed 평균·SD·case bootstrap, HD95 실패 전이·민감도 분석 |
+| 9. 결과 보존·팀 인수인계 | 완료 | 코드·설정·결과·검산·그림 및 실행 산출물 공개 |
+| 10. 기말보고서 작성·제출 | 팀 작성 | 제출 양식에 맞춰 각 절과 표·그림을 배치하고 분량·인용 확인 |
 
-평가 metric 함수와 계약은 이미 구현·고정돼 있다. 전체 test 사례를 읽고 추론 결과를
-원본 grid로 복원해 점수와 재개 상태를 저장하는 실행 경로는 추가 구현·통합 검증이 필요하다.
+실행기는 기존 평가 계약과 선정 checkpoint를 검증하고, 원본 grid로 복원한 prediction을
+개별 장기 mask와 비교한다. 모델–case별 SQLite 저장이 끝난 작업은 재실행 시 건너뛴다.
 장기 부피·초기 성능과 개선량의 관계는 사전 기록된 탐색 분석으로 다루며 인과 설명으로
 해석하지 않는다. Test 결과를 보고 seed·모델·학습 예산·평가 규칙을 다시 고르지 않는다.
 
@@ -119,7 +276,7 @@ Fast cache 673건의 검증과 원본 전처리 배열 약 25.55 GiB 정리를 �
 | Seed | 상태 |
 |---:|---|
 | 20261029, 20261030, 20261031, 20261101, 20261102 | 학습·M0 소아 사후 평가·5-seed 집계 완료 |
-| 공식 test 평가 | 미실행; 고정 계약에 따른 Dice·NSD·HD95 평가가 다음 단계 |
+| 공식 test 평가 | 1,620회 평가·결과 검산 완료 |
 
 ```bash
 .venv/bin/python scripts/02_summarize_development.py --seeds 20261029 20261030 20261031 20261101 20261102
@@ -132,8 +289,8 @@ Fast cache 673건의 검증과 원본 전처리 배열 약 25.55 GiB 정리를 �
 동일 case의 여러 seed 결과를 독립 환자로 세지 않고, case bootstrap에서는 seed·모델 값을
 case와 함께 묶어 재표집한다. 반복 seed는 같은 split의 학습 난수 변동을 보여주며,
 소아 test의 장기별 적격 사례 6–9건과 환자 ID 부재라는 한계는 그대로 남는다.
-모델 가중치, 원본 CT, case별 manifest와 실행 출력은
-Git에서 제외해 로컬에 보관한다. 공개 README에는 검증된 집계값과 한계를 기록한다.
+원본 CT는 공식 배포본으로 연결한다. 가중치·case별 manifest·실행 출력은 Release에 보존한다.
+Git 트리에는 검증된 집계값, 방법, 그림과 실행 코드를 둔다.
 
 ## 실행 환경
 
@@ -389,7 +546,7 @@ Test 이미지는 development 검토 갤러리에 포함되지 않는다.
 | 구조·입력 | PlainConvUNet, 7 organs + background, patch 96×128×128, batch 1 |
 | optimizer | SGD Nesterov, momentum 0.99, weight decay 3e-5 |
 | LR | M0 0.01; M1·M2 0.001; `LR = initial × (1 − completed_updates / budget)^0.9` |
-| loss·AMP | background 제외 soft Dice + CE, 가중치 1:1; FP16, 초기 scale 1024, gradient clip 12 |
+| loss·AMP | 전경 soft Dice와 CE의 가중치 1:1. CE는 배경 포함, 겹침 ignore는 두 항에서 제외. FP16, 초기 scale 1024, gradient clip 12 |
 | case sampling | 매 update 해당 학습군에서 균등 복원 추출; cache hit 여부와 무관 |
 | foreground | 확률 1/3로 장기를 균등 선택한 뒤 저장된 해당 장기 좌표에서 추출 |
 | augmentation | 정규화 후 brightness ×U(0.85,1.15), p=0.15; mean 중심 contrast ×U(0.85,1.15), p=0.15; Gaussian noise σ∼U(0,0.1), p=0.1; 순서 고정 |
@@ -405,7 +562,7 @@ Optimizer와 polynomial LR은 [nnU-Net의 구현](https://github.com/MIC-DKFZ/nn
 M1·M2는 같은 M0 selected checkpoint의 파일·가중치 hash를 기록하고 optimizer를 새로 만든다.
 AMP skip은 성공 update로 세지 않으며 연속 10회/총 100회면 오류로 중단한다.
 Validation Dice는 겹침 ignore voxel을 제외한 hard Dice다. GT가 있는 장기의 빈 prediction은 0이며,
-case별 점수 → 장기별 평균 → 7장기 macro 순서로 집계한다. 최종 test의 원본 개별 mask 평가는 별도로 구현해야 한다.
+case별 점수 → 장기별 평균 → 7장기 macro 순서로 집계한다. 공식 test는 별도 실행 경로에서 원본 개별 mask를 평가한다.
 
 **실제 실행 경로 시험은 완료했다.** 각 branch 32 updates, 16회에서 checkpoint 복원,
 각 branch의 성인·소아 validation 전체 32건 추론을 수행했다. 모든 branch에서 AMP skip 0, 정상 완료다.
@@ -522,7 +679,16 @@ Surface metric은 [DeepMind surface-distance](https://github.com/google-deepmind
 [0.1 배포본](https://pypi.org/project/surface-distance/0.1/)에 고정했다. 공통 hard Dice 계산을 재사용한다.
 동일·이동·빈 mask, 대칭성, 기존 validation Dice와의 일치 검사가 통과했다.
 학습 loss의 soft Dice는 미분 가능한 별도 목적함수이며 평가 hard Dice와 혼동하지 않는다.
-최종 모델에 대한 일괄 test 추론·결과 집계 실행은 학습 완료 후 연결한다. 현재는 계산 함수와 평가 계약을 검증한 상태다.
+공식 test 실행 명령은 아래와 같다. `--preflight`는 추론 없이 checkpoint와 입력 계약을 검사하고,
+`--smoke`는 성인·소아 development CT 각 1건에서 같은 추론·평가 경로를 점검한다.
+
+```bash
+.venv/bin/python -u -m tsv3.evaluation --official-test --host-volume /mnt/c
+```
+
+중단한 경우 같은 명령으로 재개한다. 출력은 `outputs/test_abdominal_v1/`의 `scores.sqlite`,
+`summary.json`, `report.md`에 보존한다. Summary에는 seed별 점수, paired case bootstrap,
+민감도 분석과 HD95 실패 전이·유한 pair 분모를 기록한다. 모든 모델–case 평가가 저장된 뒤 집계한다.
 
 ## 코드와 산출물의 역할
 
@@ -536,14 +702,14 @@ Surface metric은 [DeepMind surface-distance](https://github.com/google-deepmind
 | `src/tsv3/probe.py` | 기존/선정 class의 짧은 실행 비용 측정 CLI |
 | `src/tsv3/training.py` | 공통 모델·update·추론·checkpoint, bounded cache, validation, M0/M1/M2 실행 CLI |
 | `src/tsv3/fast_cache.py` | 원본 cache의 lossless 고속 복제·무결성 검사·중단 후 변환 재개 |
-| `src/tsv3/evaluation.py` | 공통 hard Dice·NSD·HD95, test eligibility·source identity 고정 및 학습 전 검사 |
+| `src/tsv3/evaluation.py` | hard Dice·NSD·HD95, test 계약 고정·검증, 공식 평가·재개·집계 |
 | `src/tsv3/night.py` | 전처리 대기·검증과 cache 기반 GPU 통합 시험 자동 실행 |
 | `src/tsv3/preprocessing.py` | native-grid 전처리·M0 전용 정규화 통계·공유 압축 cache·중단 후 재개 |
 | `src/tsv3/review.py` | 기존 QC를 이용한 장기 후보 선별·검토 표·재개 가능한 이미지 생성 |
 | `configs/study.json` | 현재 복부 연구의 class·통제 조건·평가 규칙과 미확정 항목 |
 | `configs/protocol.json` | 완료된 전체 QC와 과거 임시 split의 설정 |
 | `configs/probe.json` | 완료된 117-class 실행 시험의 설정 |
-| `manifests/` | 로컬 QC와 split 산출물. 공개 전 검토 필요 |
+| `manifests/` | Release evidence 아카이브의 QC·split·평가 계약 |
 | `outputs/` | 실행별 가중치·예측·측정 보고서와 로그 |
 | `data/preprocessed/abdominal_v1/` | 세 모델이 공유하는 압축 cache·처리 manifest·로그·정규화 통계 |
 | `data/preprocessed/abdominal_v1_fast/` | 학습 I/O용 동일 배열의 Blosc 복제·변환 manifest; 원본 통계는 복제하지 않음 |
@@ -585,7 +751,7 @@ SQLite 결과가 QC의 재개 원본이고 CSV는
 - probe는 nnU-Net 구성 요소를 이용한 명시적 PlainConvUNet 설정이다. 자동 planning된 nnU-Net 성능 재현 실험이 아니다.
 - 과거 117-class probe는 nominal 3mm, 현재 7-class probe는 저장 격자 nominal 1.5에서 시행했다. 둘 다 짧은 실행 점검이다.
 - probe M1·M2는 같은 probe M0 가중치에서 시작하고 optimizer는 동일하게 재초기화한다. normalization은 probe M0 성인 입력에서만 산출한다.
-- 전처리·전체 validation 실행 시험·수치 학습 계획·평가 protocol 고정과 M0·M1·M2 세 seed 학습·development validation을 완료했다. 남은 2개 seed 및 최종 test 평가·분석이 남아 있다. 환자 ID 부재와 제한된 annotation 검토는 명시된 연구 한계다.
+- 전처리·수치 학습 계획·평가 protocol 고정, 5개 seed 학습과 development validation, 공식 test 평가·결과 검산을 완료했다. 환자 ID 부재와 제한된 annotation 검토는 연구 한계다.
 
 ## 근거
 
