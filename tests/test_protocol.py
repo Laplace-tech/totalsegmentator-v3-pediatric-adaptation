@@ -678,6 +678,77 @@ class FastCacheMaintenanceTests(unittest.TestCase):
 
 
 class EvaluationTests(unittest.TestCase):
+    def test_test_preparation_reverses_axis_permutation_and_keeps_original_masks(self):
+        from nibabel.orientations import apply_orientation, axcodes2ornt, io_orientation, ornt_transform
+        from tsv3.evaluation import prepare_test_case
+        from tsv3.data import sha256
+
+        values = np.arange(60, dtype=np.float32).reshape(3, 4, 5)
+        affine = np.array([[0, -2, 0, 10], [0, 0, 1, 20], [3, 0, 0, 30], [0, 0, 0, 1]])
+        reference = (values > 30).astype(np.uint8)
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = Path(tmp)
+            (raw / "case/segmentations").mkdir(parents=True)
+            sources = {}
+            for relative, array in (("case/ct.nii.gz", values), ("case/segmentations/label.nii.gz", reference)):
+                path = raw / relative
+                nib.save(nib.Nifti1Image(array, affine), path)
+                sources[relative] = {"bytes": path.stat().st_size, "sha256": sha256(path)}
+            data, inverse, shape, references = prepare_test_case(
+                raw, "case", ["label"], sources, {"lower": 0, "upper": 60, "mean": 0, "std": 1})
+            self.assertEqual(shape, values.shape)
+            self.assertNotEqual(data.shape[1:], shape)
+            forward = ornt_transform(io_orientation(affine), axcodes2ornt(("R", "A", "S")))
+            np.testing.assert_array_equal(data[0], apply_orientation(values, forward))
+            np.testing.assert_array_equal(apply_orientation(data[0], inverse), values)
+            np.testing.assert_array_equal(references["label"], reference.astype(bool))
+
+    def test_score_store_reopens_committed_results_and_rejects_changed_identity(self):
+        import sqlite3
+        from tsv3.evaluation import open_score_store, store_score
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "scores.sqlite"
+            with contextlib.closing(sqlite3.connect(path)) as db:
+                open_score_store(db, {"normalization": "same"})
+                store_score(db, (1, "M0", "a"), {"HD95": None, "HD95_infinite": True})
+            with contextlib.closing(sqlite3.connect(path)) as db:
+                open_score_store(db, {"normalization": "same"})
+                self.assertEqual(json.loads(db.execute("SELECT result FROM scores").fetchone()[0]),
+                                 {"HD95": None, "HD95_infinite": True})
+                with self.assertRaisesRegex(ValueError, "inputs, code or runtime changed"):
+                    open_score_store(db, {"normalization": "different"})
+
+    def test_paired_hd95_excludes_failures_only_from_finite_delta_and_counts_transitions(self):
+        from tsv3.evaluation import summarize_official_scores, MODELS
+
+        seeds, cases = [1, 2], ["a", "b", "empty"]
+        contract = {"test_case_ids": {"pediatric": cases},
+                    "all_7_primary_eligible_cases_for_descriptive_sensitivity": {"pediatric": ["a", "b"]},
+                    "evaluation": {"uncertainty": {"seed": 1, "bootstrap_replicates": 20, "confidence_level": .95}}}
+        rows = [{"case_id": case, "cohort": "pediatric", "label": "organ", "reference_voxels": "0" if case == "empty" else "10",
+                 "primary_eligible": str(int(case != "empty")), "sensitivity_eligible": str(int(case != "empty"))} for case in cases]
+        results = {}
+        for seed in seeds:
+            for model in MODELS:
+                for case in cases:
+                    empty = case == "empty"
+                    failed = (seed, model, case) == (1, "M2", "b")
+                    score = {"Dice": None if empty else (0 if failed else 1),
+                             "NSD": None if empty else (0 if failed else 1),
+                             "HD95": None if empty or failed else (1 if model == "M1" else 2),
+                             "HD95_infinite": failed, "prediction_voxels": 0 if failed else 10}
+                    results[seed, model, case] = {"organs": {"organ": score}}
+        organ = summarize_official_scores(results, seeds, ["organ"], contract, rows)["results"]["pediatric"]["primary"]["organ"]
+        delta = organ["contrasts"]["M1_minus_M2"]
+        self.assertEqual(delta["Dice"]["all_seed_finite_paired_cases"], 2)
+        self.assertEqual(delta["Dice"]["mean"], .25)
+        self.assertEqual(delta["HD95"]["per_seed_finite_pairs"], [1, 2])
+        self.assertEqual(delta["HD95"]["all_seed_finite_paired_cases"], 1)
+        self.assertEqual(delta["HD95"]["mean"], -1)
+        self.assertEqual(delta["HD95_failure_transitions_per_seed"][0]["failure_to_finite"], 1)
+        self.assertEqual(organ["models"]["M1"]["empty_reference_prediction_voxels"][0], {"empty": 10})
+
     def test_metrics_identical_shifted_and_empty_masks(self):
         from tsv3.evaluation import score_binary
         reference = np.zeros((14, 14, 14), dtype=bool)

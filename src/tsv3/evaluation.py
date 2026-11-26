@@ -6,6 +6,9 @@ import importlib.metadata
 import hashlib
 import inspect
 import json
+import sqlite3
+import time
+from contextlib import closing
 from pathlib import Path
 
 import numpy as np
@@ -192,15 +195,395 @@ def validate_evaluation_contract(study):
     return {"contract_sha256": sha256(path), "eligibility_sha256": contract["eligibility_sha256"]}
 
 
+MODELS = ("M0", "M1", "M2")
+METRICS = ("Dice", "NSD", "HD95")
+
+
+def verified_input(raw, relative, sources):
+    path = raw / relative
+    record = sources[relative]
+    if path.stat().st_size != record["bytes"] or sha256(path) != record["sha256"]:
+        raise ValueError(f"Raw input differs from the frozen record: {relative}")
+    return path
+
+
+def prepare_test_case(raw, case, labels, sources, normalization):
+    import nibabel as nib
+    from .audit import geometry, geometry_delta_voxels
+    from .preprocessing import normalize_inplace
+
+    source = nib.load(verified_input(raw, f"{case}/ct.nii.gz", sources))
+    shape, spacing = geometry(source)
+    canonical = nib.as_closest_canonical(source)
+    data = np.asarray(canonical.dataobj, dtype=np.float32).copy()[None]
+    if not np.isfinite(data).all():
+        raise ValueError(f"Nonfinite CT: {case}")
+    normalize_inplace(data, normalization)
+    inverse = nib.orientations.ornt_transform(nib.orientations.io_orientation(canonical.affine),
+                                              nib.orientations.io_orientation(source.affine))
+    restored_affine = canonical.affine @ nib.orientations.inv_ornt_aff(inverse, data.shape[1:])
+    if not np.allclose(restored_affine, source.affine, rtol=0, atol=1e-6):
+        raise ValueError(f"Inverse orientation changed the source grid: {case}")
+
+    references = {}
+    for label in labels:
+        relative = f"{case}/segmentations/{label}.nii.gz"
+        mask = nib.load(verified_input(raw, relative, sources))
+        if (mask.shape != shape or mask.header.get_xyzt_units()[0] != source.header.get_xyzt_units()[0]
+                or geometry_delta_voxels(mask.affine, source.affine, shape, spacing) > 0.1):
+            raise ValueError(f"Reference grid differs from CT: {relative}")
+        values = np.asanyarray(mask.dataobj)
+        if not np.logical_or(values == 0, values == 1).all():
+            raise ValueError(f"Nonbinary reference: {relative}")
+        references[label] = values.astype(bool, copy=False)
+    return data, inverse, shape, references
+
+
+def score_prepared_case(model, prepared, labels, config, tolerance):
+    from nibabel.orientations import apply_orientation
+    from .training import infer_volume
+
+    data, inverse, shape, references = prepared
+    started = time.monotonic()
+    prediction, timing = infer_volume(model, data, labels, config)
+    prediction = apply_orientation(prediction, inverse)
+    if prediction.shape != shape:
+        raise ValueError("Restored prediction shape differs from original CT")
+    scores = {label: score_binary(references[label], prediction == index, tolerance)
+              for index, label in enumerate(labels, 1)}
+    return {"organs": scores, "inference_seconds": timing["seconds"],
+            "elapsed_seconds": time.monotonic() - started, "shape": list(shape),
+            "peak_reserved_mib": timing["peak_reserved_mib"]}
+
+
+def open_score_store(db, identity):
+    db.execute("CREATE TABLE IF NOT EXISTS run (id INTEGER PRIMARY KEY CHECK(id=1), identity TEXT NOT NULL)")
+    db.execute("""CREATE TABLE IF NOT EXISTS scores (
+        seed INTEGER NOT NULL, model TEXT NOT NULL, case_id TEXT NOT NULL, result TEXT NOT NULL,
+        PRIMARY KEY(seed, model, case_id))""")
+    signature = json.dumps(identity, sort_keys=True, allow_nan=False)
+    saved = db.execute("SELECT identity FROM run WHERE id=1").fetchone()
+    if saved is None:
+        if db.execute("SELECT 1 FROM scores LIMIT 1").fetchone():
+            raise ValueError("Existing scores lack run identity")
+        with db:
+            db.execute("INSERT INTO run VALUES (1, ?)", (signature,))
+    elif saved[0] != signature:
+        raise ValueError("Evaluation inputs, code or runtime changed since the saved run")
+
+
+def store_score(db, key, result):
+    with db:
+        db.execute("INSERT INTO scores VALUES (?, ?, ?, ?)", (*key, json.dumps(result, allow_nan=False)))
+
+
+def evaluation_inputs(args):
+    from .night import verify_completion
+    from .preprocessing import load_plan
+    from .training import branch_config
+
+    plan = load_plan(args)
+    study, labels = plan["study"], plan["labels"]
+    cache = ROOT / "data/preprocessed/abdominal_v1"
+    manifest, norm = verify_completion(cache, plan)
+    evaluation_id = validate_evaluation_contract(study)
+    contract_path = ROOT / study["evaluation"]["manifest"]
+    contract = json.loads(contract_path.read_text())
+    cohorts = contract["test_case_ids"]
+    if any(sorted(ids) != sorted(plan["split"]["partitions"][cohort + "_test"])
+           for cohort, ids in cohorts.items()):
+        raise ValueError("Contract test membership differs from split")
+    if set(plan["roles"]).intersection(case for ids in cohorts.values() for case in ids):
+        raise ValueError("Development and test inputs intersect")
+
+    seeds = study["training"]["replication_plan"]["seeds"]
+    aggregate_path = ROOT / f"outputs/training_{study['study_version']}_seed{seeds[-1]}/replication_validation.json"
+    development = json.loads(aggregate_path.read_text())
+    common = development["common_input_identity"]
+    if (development["seeds"] != seeds or development["planned_seeds"] != seeds
+            or common != {"split_sha256": plan["signature"]["split_sha256"],
+                          "normalization_sha256": manifest["normalization"]["sha256"],
+                          "evaluation_contract_sha256": evaluation_id["contract_sha256"],
+                          "eligibility_sha256": evaluation_id["eligibility_sha256"]}):
+        raise ValueError("Expected verified all-seed development report with matching inputs")
+
+    checkpoints = {}
+    for seed in seeds:
+        directory = ROOT / f"outputs/training_{study['study_version']}_seed{seed}"
+        run_path = directory / "run.json"
+        run = json.loads(run_path.read_text())
+        files = development["input_file_sha256"]
+        if run["status"] != "complete" or sha256(run_path) != files[str(run_path.relative_to(ROOT))]:
+            raise ValueError(f"Run differs from the verified development report: {seed}")
+        integrity = development["integrity"][str(seed)]
+        if not integrity["M1_M2_same_M0_selected_initialization_and_numeric_config"]:
+            raise ValueError(f"M1/M2 checkpoint pairing not verified: {seed}")
+        for model in MODELS:
+            status_path = directory / model / "status.json"
+            if sha256(status_path) != files[str(status_path.relative_to(ROOT))]:
+                raise ValueError(f"Branch status differs from the verified report: {seed}/{model}")
+            status = json.loads(status_path.read_text())
+            checkpoint = directory / model / "selected.pt"
+            config = branch_config(run["study_snapshot"], model, False, seed)
+            budget = config["optimizer_updates"]
+            if (status["status"] != "complete" or status["updates"] != budget
+                    or status["selected_checkpoint_sha256"] != integrity["selected_sha256"][model]
+                    or sha256(checkpoint) != status["selected_checkpoint_sha256"]
+                    or config != branch_config(study, model, False, seed)):
+                raise ValueError(f"Checkpoint/status/config mismatch: {seed}/{model}")
+            checkpoints[seed, model] = (checkpoint, config, status["selected_checkpoint_sha256"])
+
+    rows = read_csv(contract_path.parent / "eligibility.csv")
+    expected = {(cohort, case, label) for cohort, cases in cohorts.items() for case in cases for label in labels}
+    keys = {(r["cohort"], r["case_id"], r["label"]) for r in rows}
+    if keys != expected or len(rows) != len(expected):
+        raise ValueError("Incomplete or duplicated eligibility records")
+    identity = {**common, "development_report_sha256": sha256(aggregate_path),
+                "checkpoints_sha256": {f"{s}/{m}": value[2] for (s, m), value in checkpoints.items()},
+                "code_sha256": {name: sha256(Path(__file__).with_name(name)) for name in
+                                ("evaluation.py", "training.py", "preprocessing.py", "audit.py")},
+                "uv_lock_sha256": sha256(ROOT / "uv.lock")}
+    return plan, manifest, norm, contract, rows, checkpoints, identity
+
+
+def summarize_delta(left, right, uncertainty, confidence=True):
+    """Rows are training seeds, columns are the same paired cases."""
+    left, right = np.asarray(left, dtype=float), np.asarray(right, dtype=float)
+    valid = np.isfinite(left) & np.isfinite(right)
+    delta = left - right
+    seed_means = [float(row[mask].mean()) if mask.any() else None for row, mask in zip(delta, valid)]
+    common = valid.all(axis=0)
+    paired = delta[:, common]
+    by_case = paired.mean(axis=0)
+    per_seed_common = paired.mean(axis=1) if common.any() else None
+    interval = None
+    if confidence and len(by_case) >= 2:
+        rng = np.random.default_rng(uncertainty["seed"])
+        indices = rng.integers(0, len(by_case), size=(uncertainty["bootstrap_replicates"], len(by_case)))
+        alpha = (1 - uncertainty["confidence_level"]) / 2
+        interval = np.quantile(by_case[indices].mean(axis=1), [alpha, 1 - alpha]).tolist()
+    return {"eligible_cases": int(left.shape[1]), "all_seed_finite_paired_cases": int(common.sum()),
+            "per_seed_mean": seed_means, "per_seed_finite_pairs": valid.sum(axis=1).tolist(),
+            "mean": float(by_case.mean()) if common.any() else None,
+            "seed_sample_SD": float(per_seed_common.std(ddof=1)) if common.any() and left.shape[0] > 1 else None,
+            "positive_seed_count": sum(value is not None and value > 0 for value in seed_means),
+            "negative_seed_count": sum(value is not None and value < 0 for value in seed_means),
+            "pointwise_paired_case_interval": interval}
+
+
+def summarize_official_scores(results, seeds, labels, contract, rows):
+    from scipy.stats import spearmanr
+
+    uncertainty = contract["evaluation"]["uncertainty"]
+    groups = collections.defaultdict(list)
+    for row in rows:
+        groups[row["cohort"], row["label"]].append(row)
+    summary = {}
+    analysis = {}
+    for cohort in contract["test_case_ids"]:
+        summary[cohort] = {}
+        common_cases = set(contract["all_7_primary_eligible_cases_for_descriptive_sensitivity"][cohort])
+        for policy in ("primary", "nonempty_sensitivity", "all_7_primary_sensitivity"):
+            by_organ = summary[cohort][policy] = {}
+            for label in labels:
+                records = groups[cohort, label]
+                cases = [row["case_id"] for row in records if
+                         (row["case_id"] in common_cases if policy == "all_7_primary_sensitivity" else
+                          row["primary_eligible" if policy == "primary" else "sensitivity_eligible"] == "1")]
+                empty_cases = [row["case_id"] for row in records if row["reference_voxels"] == "0"]
+                scores = {m: [[results[s, m, c]["organs"][label] for c in cases] for s in seeds] for m in MODELS}
+                organ = by_organ[label] = {"eligible_cases": len(cases), "empty_reference_cases": len(empty_cases),
+                                          "models": {}, "contrasts": {}}
+                for model in MODELS:
+                    model_summary = organ["models"][model] = {}
+                    for metric in METRICS:
+                        values = [[r[metric] for r in group if r[metric] is not None] for group in scores[model]]
+                        means = [float(np.mean(v)) if v else None for v in values]
+                        model_summary[metric] = {"per_seed_mean": means,
+                                                 "mean_of_seed_means": float(np.mean(means)) if all(m is not None for m in means) else None,
+                                                 "per_seed_finite_cases": [len(v) for v in values]}
+                    model_summary["per_seed_empty_predictions"] = [sum(r["HD95_infinite"] for r in group)
+                                                                   for group in scores[model]]
+                    if policy == "primary":
+                        model_summary["empty_reference_prediction_voxels"] = [
+                            {c: results[s, model, c]["organs"][label]["prediction_voxels"] for c in empty_cases}
+                            for s in seeds]
+                for left, right in (("M1", "M2"), ("M1", "M0"), ("M2", "M0")):
+                    contrast = organ["contrasts"][f"{left}_minus_{right}"] = {}
+                    for metric in METRICS:
+                        a, b = ([[r[metric] for r in group] for group in scores[m]] for m in (left, right))
+                        contrast[metric] = summarize_delta(a, b, uncertainty, confidence=policy == "primary")
+                    contrast["HD95_failure_transitions_per_seed"] = [
+                        {"failure_to_finite": sum(b["HD95_infinite"] and not a["HD95_infinite"] for a, b in pairs),
+                         "finite_to_failure": sum(a["HD95_infinite"] and not b["HD95_infinite"] for a, b in pairs),
+                         "both_failed": sum(a["HD95_infinite"] and b["HD95_infinite"] for a, b in pairs)}
+                        for pairs in [list(zip(a, b)) for a, b in zip(scores[left], scores[right])]]
+                if cohort == "pediatric" and policy == "primary":
+                    analysis[label] = {"mean_GT_voxels": float(np.mean([int(row["reference_voxels"]) for row in records
+                                                                     if row["case_id"] in cases])),
+                                       "M0_Dice": organ["models"]["M0"]["Dice"]["mean_of_seed_means"],
+                                       "M1_minus_M0_Dice": organ["contrasts"]["M1_minus_M0"]["Dice"]["mean"]}
+    gain = [v["M1_minus_M0_Dice"] for v in analysis.values()]
+    associations = {}
+    for name in ("mean_GT_voxels", "M0_Dice"):
+        values = [v[name] for v in analysis.values()]
+        rho = spearmanr(values, gain).statistic if len(set(values)) > 1 and len(set(gain)) > 1 else None
+        associations[name] = None if rho is None else float(rho)
+    return {"results": summary, "pediatric_exploratory_analysis": {"per_organ": analysis, "Spearman_rho": associations,
+            "limitations": ["Seven organs, left and right organs are related, eligible case mix varies by organ.",
+                            "The baseline and the gain relative to the baseline are mathematically coupled."]}}
+
+
+def write_test_report(path, report):
+    def effect(value):
+        mean, sd, interval = value["mean"], value["seed_sample_SD"], value["pointwise_paired_case_interval"]
+        if mean is None:
+            return "NA"
+        span = f" [{interval[0]:+.4f}, {interval[1]:+.4f}]" if interval is not None else ""
+        return f"{mean:+.4f} ± {sd:.4f}{span} (n={value['all_seed_finite_paired_cases']})"
+
+    lines = ["# 공식 test 결과", "", f"평가 모델 {report['models']}개, 모델–case 평가 {report['jobs']}건.",
+             "원본 voxel grid의 Dice, NSD(2 voxel), HD95(voxel). Δ는 표의 왼쪽 모델에서 오른쪽 모델을 뺀 값이다.",
+             "평균 ± seed 표본 SD [case bootstrap 95% 범위]. HD95는 모든 seed에서 두 모델 모두 유한한 경우의 조건부 효과다."]
+    for cohort, comparisons in (("pediatric", ("M1_minus_M2", "M1_minus_M0")),
+                                ("adult", ("M1_minus_M0", "M2_minus_M0"))):
+        for comparison in comparisons:
+            lines += ["", f"## {cohort} {comparison}", "", "| 장기 | 적격 case | ΔDice | ΔNSD | ΔHD95 |",
+                      "|---|---:|---|---|---|"]
+            for label, organ in report["results"][cohort]["primary"].items():
+                cells = [label, str(organ["eligible_cases"])] + [effect(organ["contrasts"][comparison][m]) for m in METRICS]
+                lines.append("| " + " | ".join(cells) + " |")
+    lines += ["", "장기별 적격 case가 다르며 소아 주 분석은 장기당 6–9건이다. 동일 case를 seed마다 재사용했다.",
+              "HD95 실패 전이, 민감도 분석, seed별 수치 및 탐색 분석은 `summary.json`에 기록했다.", ""]
+    temporary = path.with_suffix(".md.tmp")
+    temporary.write_text("\n".join(lines), encoding="utf-8")
+    temporary.replace(path)
+
+
+def run_official_evaluation(args):
+    import fcntl
+    import torch
+    from .preprocessing import atomic_json, check_space
+    from .training import build_model
+
+    plan, manifest, normalization, contract, rows, checkpoints, identity = evaluation_inputs(args)
+    labels = plan["labels"]
+    counts = contract["counts"]
+    cohort_cases = contract["test_case_ids"]
+    cases = sorted(case for ids in cohort_cases.values() for case in ids)
+    for relative, record in contract["raw_sources"].items():
+        if (args.raw / relative).stat().st_size != record["bytes"]:
+            raise ValueError(f"Frozen source size changed: {relative}")
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA required for the fixed model inference")
+    identity["runtime"] = {"torch": torch.__version__, "cuda": torch.version.cuda,
+                           "gpu": torch.cuda.get_device_name()}
+    first_path, config, _ = next(iter(checkpoints.values()))
+    torch.set_num_threads(config["cpu_threads"])
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    torch.use_deterministic_algorithms(True, warn_only=True)
+    tolerance = contract["evaluation"]["NSD_tolerance_voxels"]
+    expected = {(seed, model, case) for seed, model in checkpoints for case in cases}
+    if args.preflight:
+        print(json.dumps({"status": "official_test_preflight_passed", "checkpoints": len(checkpoints),
+                          "jobs": len(expected), "cases": {c: len(ids) for c, ids in cohort_cases.items()},
+                          "counts": counts, "identity": identity}, indent=2), flush=True)
+        return
+    if args.smoke:
+        model = build_model(config, len(labels) + 1)
+        payload = torch.load(first_path, map_location="cpu", weights_only=False)
+        model.load_state_dict(payload["model"])
+        del payload
+        smoke_results = []
+        with closing(sqlite3.connect(":memory:")) as db:
+            open_score_store(db, {"development_smoke": True})
+            for role in ("adult_validation", "pediatric_validation"):
+                ids = plan["split"]["partitions"][role]
+                case = sorted(ids, key=lambda c: np.prod(manifest["completed"][c]["properties"]["source_shape"]))[len(ids) // 2]
+                sources = manifest["completed"][case]["source_files"]
+                prepared = prepare_test_case(args.raw, case, labels, sources, normalization)
+                sample = score_prepared_case(model, prepared, labels, config, tolerance)
+                key = (config["seed"], "M0", case)
+                store_score(db, key, sample)
+                saved = db.execute("SELECT result FROM scores WHERE seed=? AND model=? AND case_id=?", key).fetchone()
+                if json.loads(saved[0]) != sample:
+                    raise ValueError("Smoke score did not round trip")
+                smoke_results.append({"cohort": role, "case": case, **{k: sample[k] for k in
+                                     ("elapsed_seconds", "inference_seconds", "peak_reserved_mib", "shape")}})
+                del prepared
+        print(json.dumps({"status": "development_smoke_passed", "timings": smoke_results}, indent=2), flush=True)
+        return
+
+    output = args.output or ROOT / f"outputs/test_{plan['study']['study_version']}"
+    output.mkdir(parents=True, exist_ok=True)
+    check_space(output, args.host_volume, 64 * 2**20, config["disk_reserve_gib"])
+    with (output / ".lock").open("a") as lock, closing(sqlite3.connect(output / "scores.sqlite")) as db:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        open_score_store(db, identity)
+        done = {(s, m, c) for s, m, c in db.execute("SELECT seed, model, case_id FROM scores")}
+        if not done <= expected:
+            raise ValueError("Saved scores include unexpected cases or models")
+        print(json.dumps({"status": "running", "completed": len(done), "total": len(expected)}), flush=True)
+        if done != expected:
+            weights = {}
+            for (seed, branch), (path, branch_settings, _) in checkpoints.items():
+                payload = torch.load(path, map_location="cpu", weights_only=False)
+                if payload["config"] != branch_settings:
+                    raise ValueError(f"Checkpoint config differs: {seed}/{branch}")
+                weights[seed, branch] = payload["model"]
+                del payload
+            model = build_model(config, len(labels) + 1)
+            refs = {(r["case_id"], r["label"]): int(r["reference_voxels"]) for r in rows}
+            for case in cases:
+                pending = [(seed, branch) for seed, branch in checkpoints if (seed, branch, case) not in done]
+                if not pending:
+                    continue
+                prepared = prepare_test_case(args.raw, case, labels, contract["raw_sources"], normalization)
+                for seed, branch in pending:
+                    model.load_state_dict(weights[seed, branch])
+                    result = score_prepared_case(model, prepared, labels, checkpoints[seed, branch][1], tolerance)
+                    if any(r["reference_voxels"] != refs[case, label] for label, r in result["organs"].items()):
+                        raise ValueError(f"Reference volume differs from frozen eligibility: {case}")
+                    key = (seed, branch, case)
+                    store_score(db, key, result)
+                    done.add(key)
+                    print(json.dumps({"completed": len(done), "total": len(expected), "case": case, "seed": seed,
+                                      "model": branch, "seconds": round(result["elapsed_seconds"], 2)}), flush=True)
+                del prepared
+            del weights, model
+        if done != expected:
+            raise ValueError("Incomplete score store")
+        results = {(s, m, c): json.loads(value) for s, m, c, value in
+                   db.execute("SELECT seed, model, case_id, result FROM scores")}
+        seeds = list(dict.fromkeys(s for s, _ in checkpoints))
+        report = {"status": "official_test_complete", "models": len(checkpoints), "jobs": len(results),
+                  "seeds": seeds, "identity": identity, "limitations": contract["limitations"],
+                  **summarize_official_scores(results, seeds, labels, contract, rows)}
+        atomic_json(output / "summary.json", report)
+        write_test_report(output / "report.md", report)
+        print(json.dumps({"status": report["status"], "output": str(output), "jobs": len(results)}), flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--freeze", action="store_true", required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--freeze", action="store_true")
+    mode.add_argument("--preflight", action="store_true", help="Verify frozen inputs and selected models without inference")
+    mode.add_argument("--smoke", action="store_true", help="Run the test scoring path on two development cases")
+    mode.add_argument("--official-test", action="store_true", help="Score the frozen test and resume from committed scores")
     parser.add_argument("--study", type=Path, default=ROOT / "configs/study.json")
     parser.add_argument("--raw", type=Path, default=DEFAULT_RAW)
     parser.add_argument("--review", type=Path, default=ROOT / "manifests/review_v300")
     parser.add_argument("--qc", type=Path, default=ROOT / "manifests/qc_v300")
-    parser.add_argument("--output", type=Path, default=ROOT / "manifests/evaluation_abdominal_v1")
-    freeze_evaluation(parser.parse_args())
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--host-volume", type=Path)
+    args = parser.parse_args()
+    if args.freeze:
+        args.output = args.output or ROOT / "manifests/evaluation_abdominal_v1"
+        freeze_evaluation(args)
+    else:
+        run_official_evaluation(args)
 
 
 if __name__ == "__main__":
