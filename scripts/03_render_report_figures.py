@@ -216,18 +216,18 @@ def learning_curves(args):
         line, = axes[0].plot(x, [r["macro_Dice"] for r in records.values()], label=str(seed), lw=1.6)
         axes[0].scatter(selected/1000, records[selected]["macro_Dice"], color=line.get_color(),
                         s=42, marker="D", edgecolor="white", linewidth=.5, zorder=4)
-        if seed == 20261101:
+        if seed == 20261030:
             for idx, name, style in [(-2, "Left adrenal", "-"), (-1, "Right adrenal", "--")]:
                 axes[1].plot(x, [r["organ_mean_Dice"][idx] for r in records.values()], style, label=name)
             axes[1].axvline(selected/1000, color="#6a6a6a", lw=1, ls=":", label="Selected M0")
-    for ax, title in zip(axes, ["A   Seven-organ macro Dice", "B   Adrenal Dice · seed 20261101"]):
+    for ax, title in zip(axes, ["A   Seven-organ macro Dice", "B   Adrenal Dice · seed 20261030"]):
         ax.set_title(title, loc="left", weight="bold")
         ax.set(xlabel="Successful updates (thousands)", ylim=(-.04, 1.02))
         ax.spines[["top", "right"]].set_visible(False)
         ax.grid(axis="y", alpha=.2)
         ax.legend(frameon=False, fontsize=8, loc="upper center", bbox_to_anchor=(.5, -.17), ncol=3)
     axes[0].set_ylabel("Adult validation Dice")
-    save(fig, args.output, "m0_validation_curves.png")
+    save(fig, args.output, "m0_validation_adrenal_example.png")
 
 
 if __name__ == "__main__":
